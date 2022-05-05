@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>     // read, write, close
 #include <netinet/in.h> // struct sockaddr_in, struct sockaddr
 #include <sys/socket.h> // socket, connect
@@ -13,6 +14,8 @@
 
 #define VERSION "0.1.0"
 #define MAX_BUFFER_SIZE 4096
+#define MAX_LINES_SIZE 128
+#define MAX_LINE_SIZE 64
 
 typedef enum
 {
@@ -21,6 +24,14 @@ typedef enum
     SERVERDATA_EXECCOMMAND = 2,
     SERVERDATA_AUTH = 3,
 } PacketSourceType;
+
+typedef struct
+{
+    char game[32];
+    char host[32];
+    char port[16];
+    char password[128];
+} GameServer;
 
 // Their payload follows the following basic structure:
 typedef struct packet_source_struct
@@ -53,6 +64,48 @@ int yarcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
     return (0);
 }
 
+int parse_input_file(GameServer *gameserver, char *input)
+{
+    FILE *fp = fopen(input, "rb");
+    if (NULL == fp) {
+        fprintf(stderr, "[!] Cannot open file %s\n", input);
+        exit(1);
+    }
+
+    char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
+    char s[MAX_LINE_SIZE];
+    size_t size_lines_len = 0;
+    while (fgets(s, MAX_LINE_SIZE, fp)) {
+        lines[size_lines_len] = (char *) malloc(sizeof(char) * (strlen(s) - 1));
+        memcpy(lines[size_lines_len], s, strlen(s) - 1);
+        size_lines_len++;
+    }
+
+    // Parser input data
+    for (size_t i = 0; i < size_lines_len; ++i) {
+        char *ptr_start = lines[i];
+        char *ptr_end = strchr(lines[i], ':');
+        size_t len = ptr_end - ptr_start;
+        char *field = malloc(sizeof(char) * len);
+        memset(field, 0, len);
+        memcpy(field, lines[i], len);
+
+        char *value = ptr_end + 1;
+        if (!strcmp("game", field)) {
+            memcpy(gameserver->game, value, strlen(value));
+        } else if (!strcmp("host", field)) {
+            memcpy(gameserver->host, value, strlen(value));
+        } else if (!strcmp("port", field)) {
+            memcpy(gameserver->port, value, strlen(value));
+        } else if (!strcmp("password", field)) {
+            memcpy(gameserver->password, value, strlen(value));
+        }
+    }
+
+    fclose(fp);
+    return (0);
+}
+
 int main(int argc, char *argv[])
 {
     (void) argc;
@@ -60,29 +113,29 @@ int main(int argc, char *argv[])
 
     char buffer[256];
     memset(buffer, '\0', 256);
-    char *body = "password";
 
-    // Display some info
+    // 0. Display some info
     puts("yarcon " VERSION);
 
-    // Populate packet
+    // 1. Parse input data from file
+    GameServer gameserver = { 0 };
+    parse_input_file(&gameserver, argv[1]);
+    fprintf(stdout, "[i] Game server: %s\n", gameserver.game);
+
+    // 2. Populate auth packet
     Pckt_Src_Struct pckt = {
-        .size = 4 + 4 + strlen(body) + 2,
+        .size = 4 + 4 + strlen(gameserver.password) + 2,
         .id = abs(rand()),
         .type = SERVERDATA_AUTH,
-        .len = 4 + 4 + 4 + strlen(body) + 2
+        .len = 4 + 4 + 4 + strlen(gameserver.password) + 2
     };
-    memcpy(&pckt.body, body, strlen(body));
+    memcpy(&pckt.body, gameserver.password, strlen(gameserver.password));
 
-    // 0. Serialize data
+    // 3. Serialize data
     yarcon_serialize_data(&pckt, buffer);
 
-    // 1. Connect to remote host
+    // 4. Connect to remote host
     int sck;
-
-    // Change these values to fit your needs
-    const char *host = "192.168.1.11";
-    const char *port = "29016";
 
     struct addrinfo *result, *p = NULL;
     const struct addrinfo hints = {
@@ -96,7 +149,7 @@ int main(int argc, char *argv[])
         char ipv4[INET_ADDRSTRLEN];
         struct sockaddr_in *addr4;
 
-        int ret = getaddrinfo(host, port, &hints, &result);
+        int ret = getaddrinfo(gameserver.host, gameserver.port, &hints, &result);
         if (ret != 0) {
             fprintf(stderr, "\033[01;31mError\033[0m: getaddrinfo: %s\n", gai_strerror(ret));
             exit(1);
@@ -125,11 +178,11 @@ int main(int argc, char *argv[])
             }
         }
 
-        fprintf(stdout, "[i] \033[01;33mConnected successful!\033[0m (%s:%s)\n", host, port);
+        fprintf(stdout, "[i] \033[01;33mConnected successful!\033[0m (%s:%s)\n", gameserver.host, gameserver.port);
         freeaddrinfo(result);
     }
 
-    // 2. Auth
+    // 5. Auth
     {
         int ret = send(sck, buffer, pckt.len, 0);
         if (ret == -1) {
@@ -142,41 +195,42 @@ int main(int argc, char *argv[])
         ret = recv(sck, recv_buffer, 512, 0);
     }
 
-    // 3. Send and execute command
+    // 6. Send and execute command
     // Send message to Project Zomboid Server
+    char *cmd = "players";
     // body = "servermsg \"Server will restart in 5 minutes\"";
     // Send message to Rust Legacy Server
     // body = "notice.popupall \"Server will restart in 5 minutes\"";
-    body = "find *";
+    // body = "find *";
     pckt = (Pckt_Src_Struct){
-        .size = 4 + 4 + strlen(body) + 2,
+        .size = 4 + 4 + strlen(cmd) + 2,
         .id = abs(rand()),
         .type = SERVERDATA_EXECCOMMAND,
-        .len = 4 + 4 + 4 + strlen(body) + 2
+        .len = 4 + 4 + 4 + strlen(cmd) + 2
     };
     {
         // Populate packet
         memset(buffer, 0, sizeof(buffer));
-        memcpy(&pckt.body, body, strlen(body));
+        memcpy(&pckt.body, cmd, strlen(cmd));
 
-        // 3.1. Serialize data
+        // 6.1. Serialize data
         yarcon_serialize_data(&pckt, buffer);
 
-        // 3.2 Send
+        // 6.2 Send
         int ret = send(sck, buffer, pckt.len, 0);
         if (ret == -1) {
             perror("[!] \033[01;31mError\033[0m: failed to send packet");
             return (-1);
         }
 
-        // 3.3 Recieve
+        // 6.3 Recieve
         char recv_buffer[MAX_BUFFER_SIZE];
         memset(recv_buffer, 0, MAX_BUFFER_SIZE);
         ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)recv_buffer;
         printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
 
-        // 3.4 Deserialize data from server if auth response is ok
+        // 6.4 Deserialize data from server if auth response is ok
         // TODO: handle multiple-packet responses
         if (res->id > 0) {
             memset(recv_buffer, 0, MAX_BUFFER_SIZE);
