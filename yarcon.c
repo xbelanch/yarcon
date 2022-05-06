@@ -73,11 +73,28 @@ int parse_input_file(GameServer *gameserver, char *input)
     }
 
     char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
-    char s[MAX_LINE_SIZE];
+    char *entry = malloc(sizeof(char) * MAX_LINE_SIZE);
+    memset(entry, 0, MAX_LINE_SIZE);
+    char *s = malloc(sizeof(char) * MAX_LINE_SIZE);
     size_t size_lines_len = 0;
     while (fgets(s, MAX_LINE_SIZE, fp)) {
-        lines[size_lines_len] = (char *) malloc(sizeof(char) * (strlen(s) - 1));
-        memcpy(lines[size_lines_len], s, strlen(s) - 1);
+
+        // Clean one or more spaces
+        char *d = s;
+        char *ptr = entry;
+        while (*d != '\0') {
+            if (*d == ' ') {
+                ++d;
+            } else {
+                *entry++ = *d++;
+            }
+        }
+
+        entry = ptr;
+
+        lines[size_lines_len] = (char *) malloc(sizeof(char) * strlen(entry) - 1);
+        memcpy(lines[size_lines_len], entry, strlen(entry) - 1);
+        memset(entry, 0, MAX_LINE_SIZE);
         size_lines_len++;
     }
 
@@ -197,7 +214,7 @@ int main(int argc, char *argv[])
 
     // 6. Send and execute command
     // Send message to Project Zomboid Server
-    char *cmd = "players";
+    char *cmd = "help";
     // body = "servermsg \"Server will restart in 5 minutes\"";
     // Send message to Rust Legacy Server
     // body = "notice.popupall \"Server will restart in 5 minutes\"";
