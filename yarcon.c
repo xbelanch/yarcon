@@ -12,88 +12,8 @@
 #include <netdb.h>      // struct hostent, gethostbyname
 #include <arpa/inet.h>  // get IP addresses from sockaddr
 #include "yarcon.h"
-#include "colors.h"
+#include "color_utils.h"
 #include "pzserver.h"
-
-int serialize_int32_t(int32_t val, char *buffer)
-{
-    // val = htonl(val);
-    memcpy(buffer, &val, sizeof(int32_t));
-    return (0);
-}
-
-int yarcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
-{
-    char *ptr = buffer;
-    serialize_int32_t(pckt->size, ptr);
-    ptr += sizeof(int32_t);
-    serialize_int32_t(pckt->id, ptr);
-    ptr += sizeof(int32_t);
-    serialize_int32_t(pckt->type, ptr);
-    ptr += sizeof(int32_t);
-    memcpy(ptr, pckt->body, strlen(pckt->body));
-
-    return (0);
-}
-
-int parse_input_file(GameServer *gameserver, char *input)
-{
-    FILE *fp = fopen(input, "rb");
-    if (NULL == fp) {
-        fprintf(stderr, "[!] Cannot open file %s\n", input);
-        exit(1);
-    }
-
-    char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
-    char *entry = malloc(sizeof(char) * MAX_LINE_SIZE);
-    memset(entry, 0, MAX_LINE_SIZE);
-    char *s = malloc(sizeof(char) * MAX_LINE_SIZE);
-    size_t size_lines_len = 0;
-    while (fgets(s, MAX_LINE_SIZE, fp)) {
-
-        // Clean one or more spaces
-        char *d = s;
-        char *ptr = entry;
-        while (*d != '\0') {
-            if (*d == ' ') {
-                ++d;
-            } else {
-                *entry++ = *d++;
-            }
-        }
-
-        entry = ptr;
-
-        lines[size_lines_len] = (char *) malloc(sizeof(char) * strlen(entry) - 1);
-        memcpy(lines[size_lines_len], entry, strlen(entry) - 1);
-        memset(entry, 0, MAX_LINE_SIZE);
-        size_lines_len++;
-    }
-
-    // Parser input data
-    for (size_t i = 0; i < size_lines_len; ++i) {
-        char *ptr_start = lines[i];
-        char *ptr_end = strchr(lines[i], ':');
-        size_t len = ptr_end - ptr_start;
-        char *field = malloc(sizeof(char) * len);
-        memset(field, 0, len);
-        memcpy(field, lines[i], len);
-
-        char *value = ptr_end + 1;
-        if (!strcmp("game", field)) {
-            memcpy(gameserver->game, value, strlen(value));
-        } else if (!strcmp("host", field)) {
-            memcpy(gameserver->host, value, strlen(value));
-        } else if (!strcmp("port", field)) {
-            memcpy(gameserver->port, value, strlen(value));
-        } else if (!strcmp("password", field)) {
-            memcpy(gameserver->password, value, strlen(value));
-        }
-    }
-
-    fclose(fp);
-    return (0);
-}
 
 int main(int argc, char *argv[])
 {
@@ -108,80 +28,27 @@ int main(int argc, char *argv[])
 
     // 1. Parse input data from file
     GameServer gameserver = { 0 };
-    parse_input_file(&gameserver, argv[1]);
+    yarcon_parse_input_file(&gameserver, argv[1]);
     fprintf(stdout, BGREEN "[i] " RESET "Game server: " BYELLOW "%s\n" RESET, gameserver.game);
 
     // 2. Populate auth packet
-    Pckt_Src_Struct pckt = {
-        .size = 4 + 4 + strlen(gameserver.password) + 2,
-        .id = abs(rand()),
-        .type = SERVERDATA_AUTH,
-        .len = 4 + 4 + 4 + strlen(gameserver.password) + 2
-    };
-    memcpy(&pckt.body, gameserver.password, strlen(gameserver.password));
+    Pckt_Src_Struct pckt = { 0 };
+    yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, gameserver.password);
 
     // 3. Serialize data
     yarcon_serialize_data(&pckt, buffer);
 
     // 4. Connect to remote host
-    int sck;
-
-    struct addrinfo *result, *p = NULL;
-    const struct addrinfo hints = {
-        .ai_family = AF_UNSPEC,
-        .ai_socktype = SOCK_STREAM,
-        .ai_flags = 0,
-        .ai_protocol = 0
-    };
-    {
-        /* IPv4 */
-        char ipv4[INET_ADDRSTRLEN];
-        struct sockaddr_in *addr4;
-
-        int ret = getaddrinfo(gameserver.host, gameserver.port, &hints, &result);
-        if (ret != 0) {
-            fprintf(stderr, "\033[01;31mError\033[0m: getaddrinfo: %s\n", gai_strerror(ret));
-            exit(1);
-        } else {
-            addr4 = (struct sockaddr_in *) result->ai_addr;
-            inet_ntop(AF_INET, &addr4->sin_addr, ipv4, INET_ADDRSTRLEN);
-            fprintf(stdout, BGREEN "[i] " RESET "IP connect: " BYELLOW "%s\n" RESET, ipv4);
-        }
-
-        p = result;
-        sck = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (sck < 0) {
-            perror("\033[01;31mError\033[0m: Cannot create socket\n");
-            exit(1);
-        } else {
-            if (connect(sck, p->ai_addr, p->ai_addrlen) < 0) {
-                perror("\033[01;31mError\033[0m: Cannot connect\n");
-                close(sck);
-                freeaddrinfo(result);
-                exit(1);
-            }
-            if (p == NULL || sck < 0) {
-                perror("\033[01;31mError\033[0m: Connection failed\n");
-                freeaddrinfo(result);
-                exit(1);
-            }
-        }
-
-        fprintf(stdout, BGREEN "[i] " RESET "Connected successful! " BYELLOW "(%s:%s)\n" RESET, gameserver.host, gameserver.port);
-        freeaddrinfo(result);
-    }
+    int sck = yarcon_connect_gamserver(gameserver.host, gameserver.port);
 
     // 5. Auth
-    {
-        int ret = send(sck, buffer, pckt.len, 0);
-        if (ret == -1) {
-            perror("[!] \033[01;31mError\033[0m: failed to send packet");
-            return (-1);
-        }
+    int ret = yarcon_send_packet(sck, buffer, pckt.len);
 
-        char recv_buffer[512];
-        memset(recv_buffer, 0, 512);
-        ret = recv(sck, recv_buffer, 512, 0);
+    char recv_buffer[MAX_BUFFER_SIZE];
+    memset(recv_buffer, 0, MAX_BUFFER_SIZE);
+    if (ret == 0)
+    {
+        ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
     }
 
     // 6. Send and execute command
@@ -191,31 +58,21 @@ int main(int argc, char *argv[])
     // Send message to Rust Legacy Server
     // body = "notice.popupall \"Server will restart in 5 minutes\"";
     // body = "find *";
-    pckt = (Pckt_Src_Struct){
-        .size = 4 + 4 + strlen(cmd) + 2,
-        .id = abs(rand()),
-        .type = SERVERDATA_EXECCOMMAND,
-        .len = 4 + 4 + 4 + strlen(cmd) + 2
-    };
+    yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, cmd);
+    // 6.1. Serialize data
+    yarcon_serialize_data(&pckt, buffer);
+    // 6.2 Send
+    ret = yarcon_send_packet(sck, buffer, pckt.len);
+    if (ret == -1) {
+        perror(BRED "[!] " RESET "Error: failed to send packet\n");
+        return (-1);
+    }
+
+    // 6.3 Recieve
+    memset(recv_buffer, 0, MAX_BUFFER_SIZE);
+    if (ret == 0)
     {
-        // Populate packet
-        memset(buffer, 0, sizeof(buffer));
-        memcpy(&pckt.body, cmd, strlen(cmd));
-
-        // 6.1. Serialize data
-        yarcon_serialize_data(&pckt, buffer);
-
-        // 6.2 Send
-        int ret = send(sck, buffer, pckt.len, 0);
-        if (ret == -1) {
-            perror("[!] \033[01;31mError\033[0m: failed to send packet");
-            return (-1);
-        }
-
-        // 6.3 Recieve
-        char recv_buffer[MAX_BUFFER_SIZE];
-        memset(recv_buffer, 0, MAX_BUFFER_SIZE);
-        ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
+        ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)recv_buffer;
         // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
 
@@ -223,7 +80,7 @@ int main(int argc, char *argv[])
         // TODO: handle multiple-packet responses
         if (res->id > 0) {
             memset(recv_buffer, 0, MAX_BUFFER_SIZE);
-            ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
+            ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
             res = (Pckt_Src_Struct *)recv_buffer;
             // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
             fprintf(stdout, BGREEN "[i] " RESET "Response from game server:\n" BPURPLE "%s" RESET, res->body);
@@ -232,7 +89,7 @@ int main(int argc, char *argv[])
 
         } else {
             memset(recv_buffer, 0, MAX_BUFFER_SIZE);
-            ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
+            ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
             res = (Pckt_Src_Struct *)recv_buffer;
             printf("res->id: %u Something went wrong. Maybe password is not set properly.\n", res->id);
         }

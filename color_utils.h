@@ -1,3 +1,6 @@
+#ifndef COLOR_UTILS_H
+#define COLOR_UTILS_H
+
 // Reset Color
 #define RESET "\033[0m"
 
@@ -20,3 +23,5 @@
 #define BPURPLE  "\033[1;35m"
 #define BCYAN    "\033[1;36m"
 #define BWHITE   "\033[1;37m"
+
+#endif // COLOR_UTILS_H
