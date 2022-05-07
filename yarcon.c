@@ -11,37 +11,9 @@
 #include <sys/socket.h> // socket, connect
 #include <netdb.h>      // struct hostent, gethostbyname
 #include <arpa/inet.h>  // get IP addresses from sockaddr
-
-#define VERSION "0.1.0"
-#define MAX_BUFFER_SIZE 4096
-#define MAX_LINES_SIZE 128
-#define MAX_LINE_SIZE 64
-
-typedef enum
-{
-    SERVERDATA_RESPONSE_VALUE = 0,
-    SERVERDATA_AUTH_RESPONSE = 2,
-    SERVERDATA_EXECCOMMAND = 2,
-    SERVERDATA_AUTH = 3,
-} PacketSourceType;
-
-typedef struct
-{
-    char game[32];
-    char host[32];
-    char port[16];
-    char password[128];
-} GameServer;
-
-// Their payload follows the following basic structure:
-typedef struct packet_source_struct
-{
-    int32_t size; // 4 bytes
-    int32_t id; // 4 bytes
-    PacketSourceType type; // 1 byte
-    char body[MAX_BUFFER_SIZE]; // len of body
-    size_t len;
-} Pckt_Src_Struct;
+#include "yarcon.h"
+#include "colors.h"
+#include "pzserver.h"
 
 int serialize_int32_t(int32_t val, char *buffer)
 {
@@ -131,13 +103,13 @@ int main(int argc, char *argv[])
     char buffer[256];
     memset(buffer, '\0', 256);
 
-    // 0. Display some info
-    puts("yarcon " VERSION);
+    // 0. Display name and version
+    puts(PROGRAM_NAME " " VERSION);
 
     // 1. Parse input data from file
     GameServer gameserver = { 0 };
     parse_input_file(&gameserver, argv[1]);
-    fprintf(stdout, "[i] Game server: %s\n", gameserver.game);
+    fprintf(stdout, BGREEN "[i] " RESET "Game server: " BYELLOW "%s\n" RESET, gameserver.game);
 
     // 2. Populate auth packet
     Pckt_Src_Struct pckt = {
@@ -173,7 +145,7 @@ int main(int argc, char *argv[])
         } else {
             addr4 = (struct sockaddr_in *) result->ai_addr;
             inet_ntop(AF_INET, &addr4->sin_addr, ipv4, INET_ADDRSTRLEN);
-            fprintf(stdout, "\033[0;32mIP connect\033[0m: %s\n", ipv4);
+            fprintf(stdout, BGREEN "[i] " RESET "IP connect: " BYELLOW "%s\n" RESET, ipv4);
         }
 
         p = result;
@@ -195,7 +167,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        fprintf(stdout, "[i] \033[01;33mConnected successful!\033[0m (%s:%s)\n", gameserver.host, gameserver.port);
+        fprintf(stdout, BGREEN "[i] " RESET "Connected successful! " BYELLOW "(%s:%s)\n" RESET, gameserver.host, gameserver.port);
         freeaddrinfo(result);
     }
 
@@ -214,7 +186,7 @@ int main(int argc, char *argv[])
 
     // 6. Send and execute command
     // Send message to Project Zomboid Server
-    char *cmd = "help";
+    char *cmd = "players";
     // body = "servermsg \"Server will restart in 5 minutes\"";
     // Send message to Rust Legacy Server
     // body = "notice.popupall \"Server will restart in 5 minutes\"";
@@ -245,7 +217,7 @@ int main(int argc, char *argv[])
         memset(recv_buffer, 0, MAX_BUFFER_SIZE);
         ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)recv_buffer;
-        printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
+        // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
 
         // 6.4 Deserialize data from server if auth response is ok
         // TODO: handle multiple-packet responses
@@ -253,7 +225,11 @@ int main(int argc, char *argv[])
             memset(recv_buffer, 0, MAX_BUFFER_SIZE);
             ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
             res = (Pckt_Src_Struct *)recv_buffer;
-            printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
+            // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
+            fprintf(stdout, BGREEN "[i] " RESET "Response from game server:\n" BPURPLE "%s" RESET, res->body);
+            // TODO: Introducing game server functions
+            fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
+
         } else {
             memset(recv_buffer, 0, MAX_BUFFER_SIZE);
             ret = recv(sck, recv_buffer, MAX_BUFFER_SIZE, 0);
