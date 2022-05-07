@@ -20,35 +20,40 @@ int main(int argc, char *argv[])
     (void) argc;
     (void) argv[0];
 
-    char buffer[256];
-    memset(buffer, '\0', 256);
+    char buffer[MAX_BUFFER_SIZE];
+    // char recv_buffer[MAX_BUFFER_SIZE];
+
+    memset(buffer, '\0', MAX_BUFFER_SIZE);
+    // memset(recv_buffer, '\0', MAX_BUFFER_SIZE);
 
     // 0. Display name and version
     puts(PROGRAM_NAME " " VERSION);
 
     // 1. Parse input data from file
     GameServer gameserver = { 0 };
+
+    // TODO: Parse input arguments
     yarcon_parse_input_file(&gameserver, argv[1]);
+
+    // IF LOG
     fprintf(stdout, BGREEN "[i] " RESET "Game server: " BYELLOW "%s\n" RESET, gameserver.game);
 
-    // 2. Populate auth packet
+    // Populate auth packet
     Pckt_Src_Struct pckt = { 0 };
     yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, gameserver.password);
 
-    // 3. Serialize data
+    // Serialize data
     yarcon_serialize_data(&pckt, buffer);
 
-    // 4. Connect to remote host
+    // Connect to remote host
     int sck = yarcon_connect_gamserver(gameserver.host, gameserver.port);
 
-    // 5. Auth
+    // Send auth packet
     int ret = yarcon_send_packet(sck, buffer, pckt.len);
 
-    char recv_buffer[MAX_BUFFER_SIZE];
-    memset(recv_buffer, 0, MAX_BUFFER_SIZE);
     if (ret == 0)
     {
-        ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
+        ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
     }
 
     // 6. Send and execute command
@@ -68,29 +73,29 @@ int main(int argc, char *argv[])
         return (-1);
     }
 
-    // 6.3 Recieve
-    memset(recv_buffer, 0, MAX_BUFFER_SIZE);
+    // Recieve
+    memset(buffer, 0, MAX_BUFFER_SIZE);
     if (ret == 0)
     {
-        ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
-        Pckt_Src_Struct *res = (Pckt_Src_Struct *)recv_buffer;
+        ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
+        Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
         // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
 
         // 6.4 Deserialize data from server if auth response is ok
         // TODO: handle multiple-packet responses
         if (res->id > 0) {
-            memset(recv_buffer, 0, MAX_BUFFER_SIZE);
-            ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
-            res = (Pckt_Src_Struct *)recv_buffer;
+            memset(buffer, 0, MAX_BUFFER_SIZE);
+            ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
+            res = (Pckt_Src_Struct *)buffer;
             // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
             fprintf(stdout, BGREEN "[i] " RESET "Response from game server:\n" BPURPLE "%s" RESET, res->body);
             // TODO: Introducing game server functions
             fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
 
         } else {
-            memset(recv_buffer, 0, MAX_BUFFER_SIZE);
-            ret = yarcon_receive_response(sck, recv_buffer, MAX_BUFFER_SIZE);
-            res = (Pckt_Src_Struct *)recv_buffer;
+            memset(buffer, 0, MAX_BUFFER_SIZE);
+            ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
+            res = (Pckt_Src_Struct *)buffer;
             printf("res->id: %u Something went wrong. Maybe password is not set properly.\n", res->id);
         }
     }
