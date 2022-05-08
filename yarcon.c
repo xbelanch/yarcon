@@ -20,16 +20,77 @@ int main(int argc, char *argv[])
     (void) argc;
     (void) argv[0];
 
+    // Parse input data from file
+    GameServer gameserver = { 0 };
+
+    // TODO: Parse input arguments
+    yarcon_parse_input_file(&gameserver, argv[1]);
+
+    // BE Rcon
+    {
+        Pckt_BE_Struct be_pckt = { 0 };
+        char buffer[MAX_BUFFER_SIZE];
+
+        int sockfd;
+        struct sockaddr_in si_other;
+        unsigned int sockaddr_len = sizeof(si_other);
+        {
+            if ( (sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
+                perror("socket failed");
+                return 1;
+            }
+
+            struct hostent *hostname = gethostbyname(gameserver.host);
+            if(hostname) {
+                memcpy(&si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
+            } else {
+                si_other.sin_addr.s_addr = inet_addr(gameserver.host);
+            }
+            si_other.sin_family = AF_INET;
+            si_other.sin_port = htons(atoi(gameserver.port));
+        }
+
+        // Send auth
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, gameserver.password);
+        yarcon_serialize_be_data(&be_pckt, buffer);
+
+        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(gameserver.password), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+
+        // Send command
+        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, "players");
+        yarcon_serialize_be_data(&be_pckt, buffer);
+
+        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
+        printf("msg: %s\n", res->payload + 1);
+
+    }
+
+    return (0);
+}
+
+int main2(int argc, char *argv[])
+{
+    (void) argc;
+    (void) argv[0];
+
     char buffer[MAX_BUFFER_SIZE];
     // char recv_buffer[MAX_BUFFER_SIZE];
 
     memset(buffer, '\0', MAX_BUFFER_SIZE);
     // memset(recv_buffer, '\0', MAX_BUFFER_SIZE);
 
-    // 0. Display name and version
+    // Display name and version
     puts(PROGRAM_NAME " " VERSION);
 
-    // 1. Parse input data from file
+    // Parse input data from file
     GameServer gameserver = { 0 };
 
     // TODO: Parse input arguments
@@ -46,7 +107,15 @@ int main(int argc, char *argv[])
     yarcon_serialize_data(&pckt, buffer);
 
     // Connect to remote host
-    int sck = yarcon_connect_gamserver(gameserver.host, gameserver.port);
+    // TODO: Rewrite this dumb piece of code
+    int sck;
+    if (!strcmp(gameserver.game, "pzserver")) {
+        // All that gameservers using source rcon protocol
+        sck = yarcon_connect_gameserver(gameserver.host, gameserver.port, RCON_SOURCE_PROTOCOL);
+    } else {
+        // Arma3 and other game servers using battleye rcon protocol
+        sck = yarcon_connect_gameserver(gameserver.host, gameserver.port, RCON_BATTLEYE_PROTOCOL);
+    }
 
     // Send auth packet
     int ret = yarcon_send_packet(sck, buffer, pckt.len);
