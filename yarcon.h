@@ -182,88 +182,39 @@ int yarcon_receive_response(int sck, char *buffer, size_t buffer_len)
 
 int yarcon_server_connect(GameServer *server, RconProtocolType type)
 {
-    int sock;
+    int sckfd;
     server->sockaddr_len = sizeof(server->si_other);
-
-    if (type == RCON_SOURCE_PROTOCOL) {
-        if ( (sock = socket(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP)) < 0 ) {
-            fprintf(stderr, BRED "[!] " RESET "socket creation failed\n");
-            return (1);
-        }
-    } else if (type == RCON_BATTLEYE_PROTOCOL) {
-        if ( (sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
-            fprintf(stderr, BRED "[!] " RESET "socket creation failed\n");
-            return (1);
-        }
-    }
-
     struct hostent *hostname = gethostbyname(server->host);
-    if(hostname) {
+    server->si_other.sin_port = htons(atoi(server->port));
+    server->si_other.sin_family = AF_INET;
+
+    if( hostname != NULL) {
         memcpy(&server->si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
     } else {
         server->si_other.sin_addr.s_addr = inet_addr(server->host);
     }
-    server->si_other.sin_family = AF_INET;
-    server->si_other.sin_port = htons(atoi(server->port));
 
-    return (sock);
-}
-
-int yarcon_connect_gameserver(char *host, char *port, RconProtocolType type)
-{
-    int sck;
-    struct addrinfo *result, *p = NULL;
-    struct addrinfo hints;
-
+    // SOURCE
     if (type == RCON_SOURCE_PROTOCOL) {
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_flags = 0;
-        hints.ai_protocol = 0;
-    } else if (type == RCON_BATTLEYE_PROTOCOL) {
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_DGRAM;
-        hints.ai_flags = 0;
-        hints.ai_protocol = IPPROTO_UDP;
-    }
-
-    /* IPv4 */
-    char ipv4[INET_ADDRSTRLEN];
-    struct sockaddr_in *addr4;
-
-    int ret = getaddrinfo(host, port, &hints, &result);
-    if (ret != 0) {
-        fprintf(stderr, "\033[01;31mError\033[0m: getaddrinfo: %s\n", gai_strerror(ret));
-        exit(1);
-    } else {
-        addr4 = (struct sockaddr_in *) result->ai_addr;
-        inet_ntop(AF_INET, &addr4->sin_addr, ipv4, INET_ADDRSTRLEN);
-        fprintf(stdout, BGREEN "[i] " RESET "IP connect: " BYELLOW "%s\n" RESET, ipv4);
-    }
-
-    p = result;
-    sck = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-    if (sck < 0) {
-        perror("\033[01;31mError\033[0m: Cannot create socket\n");
-        exit(1);
-    } else {
-        if (connect(sck, p->ai_addr, p->ai_addrlen) < 0) {
-            perror("\033[01;31mError\033[0m: Cannot connect\n");
-            close(sck);
-            freeaddrinfo(result);
+        sckfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sckfd < 0) {
+            perror("Failed to create TCP socket");
             exit(1);
         }
-        if (p == NULL || sck < 0) {
-            perror("\033[01;31mError\033[0m: Connection failed\n");
-            freeaddrinfo(result);
+        int err = connect(sckfd, (struct sockaddr *) &server->si_other, server->sockaddr_len);
+        if (err < 0) {
+                perror("Cannot connect to server");
+                exit(1);
+        }
+    } // BE
+    else if (type == RCON_BATTLEYE_PROTOCOL) {
+        if ((sckfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
+            perror("Failed to create UDP socket");
             exit(1);
         }
     }
 
-    fprintf(stdout, BGREEN "[i] " RESET "Connected successful! " BYELLOW "(%s:%s)\n" RESET, host, port);
-    freeaddrinfo(result);
-
-    return (sck);
+    return (sckfd);
 }
 
 int yarcon_parse_input_file(GameServer *gameserver, char *input)

@@ -20,56 +20,6 @@ int main(int argc, char *argv[])
     (void) argc;
     (void) argv[0];
 
-    // Parse input data from file
-    GameServer gameserver = { 0 };
-
-    // TODO: Parse input arguments
-    yarcon_parse_input_file(&gameserver, argv[1]);
-
-    // BE Rcon
-    {
-        Pckt_BE_Struct be_pckt = { 0 };
-        char buffer[MAX_BUFFER_SIZE];
-
-        int sockfd = yarcon_server_connect(&gameserver, RCON_BATTLEYE_PROTOCOL);
-
-        // Auth phase
-        memset(buffer, '\0', MAX_BUFFER_SIZE);
-        yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, gameserver.password);
-        yarcon_serialize_be_data(&be_pckt, buffer);
-
-        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(gameserver.password), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
-        recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
-        memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
-        memset(buffer, '\0', MAX_BUFFER_SIZE);
-
-        // Send command to game server
-        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, "players");
-        yarcon_serialize_be_data(&be_pckt, buffer);
-
-        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
-        memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
-        Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
-        printf("msg: %s\n", res->payload + 1);
-
-    }
-
-    return (0);
-}
-
-int main2(int argc, char *argv[])
-{
-    (void) argc;
-    (void) argv[0];
-
-    char buffer[MAX_BUFFER_SIZE];
-    // char recv_buffer[MAX_BUFFER_SIZE];
-
-    memset(buffer, '\0', MAX_BUFFER_SIZE);
-    // memset(recv_buffer, '\0', MAX_BUFFER_SIZE);
-
     // Display name and version
     puts(PROGRAM_NAME " " VERSION);
 
@@ -82,75 +32,82 @@ int main2(int argc, char *argv[])
     // IF LOG
     fprintf(stdout, BGREEN "[i] " RESET "Game server: " BYELLOW "%s\n" RESET, gameserver.game);
 
-    // Populate auth packet
-    Pckt_Src_Struct pckt = { 0 };
-    yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, gameserver.password);
-
-    // Serialize data
-    yarcon_serialize_data(&pckt, buffer);
-
-    // Connect to remote host
-    // TODO: Rewrite this dumb piece of code
-    int sck;
-    if (!strcmp(gameserver.game, "pzserver")) {
-        // All that gameservers using source rcon protocol
-        sck = yarcon_connect_gameserver(gameserver.host, gameserver.port, RCON_SOURCE_PROTOCOL);
-    } else {
-        // Arma3 and other game servers using battleye rcon protocol
-        sck = yarcon_connect_gameserver(gameserver.host, gameserver.port, RCON_BATTLEYE_PROTOCOL);
-    }
-
-    // Send auth packet
-    int ret = yarcon_send_packet(sck, buffer, pckt.len);
-
-    if (ret == 0)
+#ifdef SOURCE
+    // Source Rcon
     {
-        ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
-    }
+        Pckt_Src_Struct pckt = { 0 };
+        char buffer[MAX_BUFFER_SIZE];
 
-    // 6. Send and execute command
-    // Send message to Project Zomboid Server
-    char *cmd = "players";
-    // body = "servermsg \"Server will restart in 5 minutes\"";
-    // Send message to Rust Legacy Server
-    // body = "notice.popupall \"Server will restart in 5 minutes\"";
-    // body = "find *";
-    yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, cmd);
-    // 6.1. Serialize data
-    yarcon_serialize_data(&pckt, buffer);
-    // 6.2 Send
-    ret = yarcon_send_packet(sck, buffer, pckt.len);
-    if (ret == -1) {
-        perror(BRED "[!] " RESET "Error: failed to send packet\n");
-        return (-1);
-    }
+        // Connect with server
+        int sckfd = yarcon_server_connect(&gameserver, RCON_SOURCE_PROTOCOL);
 
-    // Recieve
-    memset(buffer, 0, MAX_BUFFER_SIZE);
-    if (ret == 0)
-    {
-        ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
+        // Auth phase
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, gameserver.password);
+        yarcon_serialize_data(&pckt, buffer);
+        int buffer_size = 4 + 4 + 4 + strlen(gameserver.password) + 2;
+        int ret = send(sckfd, buffer, buffer_size, 0);
+        if (ret < 0)
+            perror("[!] \033[01;31mError\033[0m: failed to send packet");
+
+        ret = recv(sckfd, buffer, buffer_size, 0);
+
+        // Send command
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, "players");
+        yarcon_serialize_data(&pckt, buffer);
+        buffer_size = 4 + 4 + 4 + strlen("players") + 2;
+        ret = send(sckfd, buffer, buffer_size, 0);
+        if (ret < 0)
+            perror("[!] \033[01;31mError\033[0m: failed to send packet");
+
+        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
-        // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
+        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s" RESET, res->body);
 
-        // 6.4 Deserialize data from server if auth response is ok
-        // TODO: handle multiple-packet responses
-        if (res->id > 0) {
-            memset(buffer, 0, MAX_BUFFER_SIZE);
-            ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
-            res = (Pckt_Src_Struct *)buffer;
-            // printf("size: %u, id: %u, type: %u, body: %s\n", res->size, res->id, res->type, res->body);
-            fprintf(stdout, BGREEN "[i] " RESET "Response from game server:\n" BPURPLE "%s" RESET, res->body);
-            // TODO: Introducing game server functions
-            fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
+        // TODO: Introducing game server functions
+        fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
 
-        } else {
-            memset(buffer, 0, MAX_BUFFER_SIZE);
-            ret = yarcon_receive_response(sck, buffer, MAX_BUFFER_SIZE);
-            res = (Pckt_Src_Struct *)buffer;
-            printf("res->id: %u Something went wrong. Maybe password is not set properly.\n", res->id);
-        }
+        close(sckfd);
+        sckfd = -1;
     }
+#endif
+
+#ifdef BATTLEYE
+    // BE Rcon
+    {
+        Pckt_BE_Struct be_pckt = { 0 };
+        char buffer[MAX_BUFFER_SIZE];
+
+        int sckfd = yarcon_server_connect(&gameserver, RCON_BATTLEYE_PROTOCOL);
+
+        // Auth phase
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, gameserver.password);
+        yarcon_serialize_be_data(&be_pckt, buffer);
+
+        sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(gameserver.password), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
+        recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+
+        // Send command to game server
+        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, "players");
+        yarcon_serialize_be_data(&be_pckt, buffer);
+
+        sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
+        memset(buffer, '\0', MAX_BUFFER_SIZE);
+        recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
+        Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
+        printf("msg: %s\n", res->payload + 1);
+
+        close(sckfd);
+        sckfd = -1;
+    }
+#endif
 
     return (0);
 }

@@ -1,5 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -std=c11 -pedantic -ggdb
+DIRECTIVES=-DSOURCE
 LIBS=
 INPUT=
 
@@ -7,4 +8,4 @@ INPUT=
 all: yarcon
 
 yarcon: yarcon.c
-	$(CC) $(CFLAGS) -o yarcon yarcon.c $(LIBS)
+	$(CC) $(CFLAGS) $(DIRECTIVES) -o yarcon yarcon.c $(LIBS)
