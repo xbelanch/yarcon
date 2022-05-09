@@ -31,43 +31,26 @@ int main(int argc, char *argv[])
         Pckt_BE_Struct be_pckt = { 0 };
         char buffer[MAX_BUFFER_SIZE];
 
-        int sockfd;
-        struct sockaddr_in si_other;
-        unsigned int sockaddr_len = sizeof(si_other);
-        {
-            if ( (sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
-                perror("socket failed");
-                return 1;
-            }
+        int sockfd = yarcon_server_connect(&gameserver, RCON_BATTLEYE_PROTOCOL);
 
-            struct hostent *hostname = gethostbyname(gameserver.host);
-            if(hostname) {
-                memcpy(&si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
-            } else {
-                si_other.sin_addr.s_addr = inet_addr(gameserver.host);
-            }
-            si_other.sin_family = AF_INET;
-            si_other.sin_port = htons(atoi(gameserver.port));
-        }
-
-        // Send auth
+        // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, gameserver.password);
         yarcon_serialize_be_data(&be_pckt, buffer);
 
-        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(gameserver.password), 0, (struct sockaddr *) &si_other, sockaddr_len);
-        recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(gameserver.password), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
+        recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
 
-        // Send command
+        // Send command to game server
         yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, "players");
         yarcon_serialize_be_data(&be_pckt, buffer);
 
-        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        sendto(sockfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &gameserver.si_other, gameserver.sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &gameserver.si_other, &gameserver.sockaddr_len);
         Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
         printf("msg: %s\n", res->payload + 1);
 

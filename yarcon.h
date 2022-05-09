@@ -37,6 +37,8 @@ typedef struct
     char host[32];
     char port[16];
     char password[128];
+    struct sockaddr_in si_other;
+    unsigned int sockaddr_len;
 } GameServer;
 
 // Their payload follows the following basic structure:
@@ -176,6 +178,35 @@ int yarcon_receive_response(int sck, char *buffer, size_t buffer_len)
 {
     int ret = recv(sck, buffer, buffer_len, 0);
     return (ret);
+}
+
+int yarcon_server_connect(GameServer *server, RconProtocolType type)
+{
+    int sock;
+    server->sockaddr_len = sizeof(server->si_other);
+
+    if (type == RCON_SOURCE_PROTOCOL) {
+        if ( (sock = socket(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP)) < 0 ) {
+            fprintf(stderr, BRED "[!] " RESET "socket creation failed\n");
+            return (1);
+        }
+    } else if (type == RCON_BATTLEYE_PROTOCOL) {
+        if ( (sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
+            fprintf(stderr, BRED "[!] " RESET "socket creation failed\n");
+            return (1);
+        }
+    }
+
+    struct hostent *hostname = gethostbyname(server->host);
+    if(hostname) {
+        memcpy(&server->si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
+    } else {
+        server->si_other.sin_addr.s_addr = inet_addr(server->host);
+    }
+    server->si_other.sin_family = AF_INET;
+    server->si_other.sin_port = htons(atoi(server->port));
+
+    return (sock);
 }
 
 int yarcon_connect_gameserver(char *host, char *port, RconProtocolType type)
