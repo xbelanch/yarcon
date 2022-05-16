@@ -211,9 +211,9 @@ int main(int argc, char *argv[])
 
         // Send command
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, "players");
+        yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
         yarcon_serialize_data(&pckt, buffer);
-        buffer_size = 4 + 4 + 4 + strlen("players") + 2;
+        buffer_size = 4 + 4 + 4 + strlen(command) + 2;
         ret = send(sckfd, buffer, buffer_size, 0);
         if (ret < 0)
             perror("[!] \033[01;31mError\033[0m: failed to send packet");
@@ -250,10 +250,10 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
 
         // Send command to game server
-        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, "players");
+        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command);
         yarcon_serialize_be_data(&be_pckt, buffer);
 
-        sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen("players"), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen(command), 0, (struct sockaddr *) &si_other, sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
         Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
