@@ -10,6 +10,10 @@
 #define MAX_LINES_SIZE 128
 #define MAX_LINE_SIZE 64
 
+// Globals
+struct sockaddr_in si_other;
+unsigned int sockaddr_len;
+
 typedef enum rcon_protocol_implementation_type
     {
         RCON_SOURCE_PROTOCOL = 0,
@@ -31,16 +35,6 @@ typedef enum be_packet_type
         BE_PACKET_MESSAGE = 0x02,
     } PacketBattleyeType;
 
-typedef struct
-{
-    char game[32];
-    char host[32];
-    char port[16];
-    char password[128];
-    struct sockaddr_in si_other;
-    unsigned int sockaddr_len;
-} GameServer;
-
 // Their payload follows the following basic structure:
 // You can find out more information at
 typedef struct packet_source_struct
@@ -60,6 +54,23 @@ typedef struct packet_battleye_struct
     uint32_t checksum; // 4-byte CRC32 checksum of the subsequent bytes
     unsigned char payload[MAX_BUFFER_SIZE]; // 0xff + packet type + command
 } Pckt_BE_Struct;
+
+void print_help()
+{
+    puts(
+         BGREEN "YARCON " VERSION RESET " - https://github.com/xbelanch/rcon\n"
+         "Send rcon commands to game servers with rcon support.\n\n"
+         "Usage: yarcon [OPTIONS] [COMMANDS]\n"
+         "Options:\n"
+         "  -H\t\tServer addres (default: 0.0.0.0)\n"
+         "  -P\t\tPort\n"
+         "  -p\t\tpassword\n"
+         "  -h\t\tPrint usage\n"
+         "  -v\t\tVersion\n\n"
+         );
+
+    puts ("Example:\n\tyarcon -H my.game.server -P port.server -p password -c \"status\"\n");
+}
 
 
 // Stolen from: https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d
@@ -163,6 +174,17 @@ void yarcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  c
     append_str("BE", pckt->start_header);
 }
 
+int rcon_send(int sckfd, char *buffer, int buffer_size, bool battleye) {
+    int ret;
+    if (battleye) {
+        ret = sendto(sckfd, buffer, buffer_size, 0, (struct sockaddr *) &si_other, sockaddr_len);
+    } else {
+        ret = send(sckfd, buffer, buffer_size, 0);
+    }
+    return (ret);
+}
+
+
 int yarcon_send_packet(int sck, char *buffer, size_t len)
 {
     int ret = send(sck, buffer, len, 0);
@@ -180,18 +202,20 @@ int yarcon_receive_response(int sck, char *buffer, size_t buffer_len)
     return (ret);
 }
 
-int yarcon_server_connect(GameServer *server, RconProtocolType type)
+int yarcon_server_connect(char *host,
+                          char *port,
+                          RconProtocolType type)
 {
     int sckfd;
-    server->sockaddr_len = sizeof(server->si_other);
-    struct hostent *hostname = gethostbyname(server->host);
-    server->si_other.sin_port = htons(atoi(server->port));
-    server->si_other.sin_family = AF_INET;
+    sockaddr_len = sizeof(si_other);
+    struct hostent *hostname = gethostbyname(host);
+    si_other.sin_port = htons(atoi(port));
+    si_other.sin_family = AF_INET;
 
     if( hostname != NULL) {
-        memcpy(&server->si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
+        memcpy(&si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
     } else {
-        server->si_other.sin_addr.s_addr = inet_addr(server->host);
+        si_other.sin_addr.s_addr = inet_addr(host);
     }
 
     // SOURCE
@@ -201,7 +225,7 @@ int yarcon_server_connect(GameServer *server, RconProtocolType type)
             perror("Failed to create TCP socket");
             exit(1);
         }
-        int err = connect(sckfd, (struct sockaddr *) &server->si_other, server->sockaddr_len);
+        int err = connect(sckfd, (struct sockaddr *) &si_other, sockaddr_len);
         if (err < 0) {
                 perror("Cannot connect to server");
                 exit(1);
@@ -217,63 +241,63 @@ int yarcon_server_connect(GameServer *server, RconProtocolType type)
     return (sckfd);
 }
 
-int yarcon_parse_input_file(GameServer *gameserver, char *input)
-{
-    FILE *fp = fopen(input, "rb");
-    if (NULL == fp) {
-        fprintf(stderr, "[!] Cannot open file %s\n", input);
-        exit(1);
-    }
+// int yarcon_parse_input_file(GameServer *gameserver, char *input)
+// {
+//     FILE *fp = fopen(input, "rb");
+//     if (NULL == fp) {
+//         fprintf(stderr, "[!] Cannot open file %s\n", input);
+//         exit(1);
+//     }
 
-    char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
-    char *entry = malloc(sizeof(char) * MAX_LINE_SIZE);
-    memset(entry, 0, MAX_LINE_SIZE);
-    char *s = malloc(sizeof(char) * MAX_LINE_SIZE);
-    size_t size_lines_len = 0;
-    while (fgets(s, MAX_LINE_SIZE, fp)) {
+//     char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
+//     char *entry = malloc(sizeof(char) * MAX_LINE_SIZE);
+//     memset(entry, 0, MAX_LINE_SIZE);
+//     char *s = malloc(sizeof(char) * MAX_LINE_SIZE);
+//     size_t size_lines_len = 0;
+//     while (fgets(s, MAX_LINE_SIZE, fp)) {
 
-        // Clean one or more spaces
-        char *d = s;
-        char *ptr = entry;
-        while (*d != '\0') {
-            if (*d == ' ') {
-                ++d;
-            } else {
-                *entry++ = *d++;
-            }
-        }
+//         // Clean one or more spaces
+//         char *d = s;
+//         char *ptr = entry;
+//         while (*d != '\0') {
+//             if (*d == ' ') {
+//                 ++d;
+//             } else {
+//                 *entry++ = *d++;
+//             }
+//         }
 
-        entry = ptr;
+//         entry = ptr;
 
-        lines[size_lines_len] = (char *) malloc(sizeof(char) * strlen(entry) - 1);
-        memcpy(lines[size_lines_len], entry, strlen(entry) - 1);
-        memset(entry, 0, MAX_LINE_SIZE);
-        size_lines_len++;
-    }
+//         lines[size_lines_len] = (char *) malloc(sizeof(char) * strlen(entry) - 1);
+//         memcpy(lines[size_lines_len], entry, strlen(entry) - 1);
+//         memset(entry, 0, MAX_LINE_SIZE);
+//         size_lines_len++;
+//     }
 
-    // Parser input data
-    for (size_t i = 0; i < size_lines_len; ++i) {
-        char *ptr_start = lines[i];
-        char *ptr_end = strchr(lines[i], ':');
-        size_t len = ptr_end - ptr_start;
-        char *field = malloc(sizeof(char) * len);
-        memset(field, 0, len);
-        memcpy(field, lines[i], len);
+//     // Parser input data
+//     for (size_t i = 0; i < size_lines_len; ++i) {
+//         char *ptr_start = lines[i];
+//         char *ptr_end = strchr(lines[i], ':');
+//         size_t len = ptr_end - ptr_start;
+//         char *field = malloc(sizeof(char) * len);
+//         memset(field, 0, len);
+//         memcpy(field, lines[i], len);
 
-        char *value = ptr_end + 1;
-        if (!strcmp("game", field)) {
-            memcpy(gameserver->game, value, strlen(value));
-        } else if (!strcmp("host", field)) {
-            memcpy(gameserver->host, value, strlen(value));
-        } else if (!strcmp("port", field)) {
-            memcpy(gameserver->port, value, strlen(value));
-        } else if (!strcmp("password", field)) {
-            memcpy(gameserver->password, value, strlen(value));
-        }
-    }
+//         char *value = ptr_end + 1;
+//         if (!strcmp("game", field)) {
+//             memcpy(gameserver->game, value, strlen(value));
+//         } else if (!strcmp("host", field)) {
+//             memcpy(gameserver->host, value, strlen(value));
+//         } else if (!strcmp("port", field)) {
+//             memcpy(gameserver->port, value, strlen(value));
+//         } else if (!strcmp("password", field)) {
+//             memcpy(gameserver->password, value, strlen(value));
+//         }
+//     }
 
-    fclose(fp);
-    return (0);
-}
+//     fclose(fp);
+//     return (0);
+// }
 
 #endif // YARCON_H
