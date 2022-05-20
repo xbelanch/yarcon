@@ -28,49 +28,6 @@ static int battleye = false;
 // static char *server = NULL;
 // static bool nowait = false;
 
-static char *strremove(char *s, char chr) {
-    char *e = malloc(sizeof(char) * 1024);
-    memset(e, 0, 1024);
-
-    char *d = s;
-    char *ptr = e;
-    while (*d != '\0') {
-        if (*d == chr) {
-            ++d;
-        } else {
-            *e++ = *d++;
-        }
-    }
-    e = ptr;
-    return (e);
-}
-
-static void print_usage()
-{
-    puts("");
-    puts("YARCON " VERSION " - https://github.com/xbelanch/rcon");
-    puts("Send rcon commands to game servers with rcon support.");
-    puts("Usage: yarcon [OPTIONS] [COMMANDS]");
-    puts("Options:");
-    puts("-H\t\tHost address (example: 0.0.0.0)");
-    puts("-P\t\tPort");
-    puts("-p\t\tpassword");
-    puts("-h\t\tPrint usage");
-    puts("-v\t\tVersion");
-    puts("-c\t\tCommand");
-    puts("-f\t\tOpen config file");
-    puts("Example:\n\tyarcon -H my.game.server -P port.server -p password -c \"status\"");
-}
-
-static void cleanup(void)
-{
-    // free(host);
-    // free(port);
-    // free(password);
-    // free(command);
-    // free(config);
-}
-
 void parse_input_file(char *filename)
 {
     // Read and parse input file
@@ -80,7 +37,7 @@ void parse_input_file(char *filename)
         exit(1);
     }
 
-    char *s = malloc(sizeof(char) * 1024);
+    char *s = malloc(sizeof(char) * MAX_LINES_SIZE);
 
     while (fgets(s, MAX_LINE_SIZE, fp)) {
 
@@ -129,38 +86,17 @@ static int parse_args(int ac, char *av[])
         case 0:
             break;
         case 'f':
-            free(config);
             len = strlen(optarg);
             config = calloc(1, len);
             memcpy(config, optarg, len);
             break;
         case 'd': debug = true; break;
         case 'b': battleye = true; break;
-        case 'H':
-            free(host);
-            len = strlen(optarg);
-            host = calloc(1, len);
-            memcpy(host, optarg, len);
-            break;
+        case 'H': host = optarg; break;
         case 'm': battleye = true; break;
-        case 'p':
-            free(port);
-            len = strlen(optarg);
-            port = calloc(1, len);
-            memcpy(port, optarg, len);
-            break;
-        case 'P':
-            free(password);
-            len = strlen(optarg);
-            password = calloc(1, len);
-            memcpy(password, optarg, len);
-            break;
-        case 'c':
-            free(command);
-            len = strlen(optarg);
-            command = calloc(1, len);
-            memcpy(command, optarg, len);
-            break;
+        case 'p': port = optarg; break;
+        case 'P': password = optarg; break;
+        case 'c': command = optarg; break;
 
         case '1': /* backward compability */ break;
         case 'h': print_usage(); exit(0); break;
@@ -197,26 +133,30 @@ int main(int argc, char *argv[])
         yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
         yarcon_serialize_data(&pckt, buffer);
         int buffer_size = 4 + 4 + 4 + strlen(password) + 2;
-        // int ret = rcon_send(sckfd, buffer, buffer_size, battleye);
-        // if (ret < 0) {
-        //     perror("[!] \033[01;31mError\033[0m: failed to send packet");
-        //     exit(1);
-        // }
 
-        int ret = send(sckfd, buffer, buffer_size, 0);
-        if (ret < 0)
-            perror("[!] \033[01;31mError\033[0m: failed to send packet");
+        int ret = rcon_send(sckfd, buffer, buffer_size, false);
+        if (ret < 0) {
+            perror(RED "[!] " RESET "Error:");
+            exit(1);
+        }
 
         ret = recv(sckfd, buffer, buffer_size, 0);
+        if (ret < 0) {
+            perror(RED "[!] " RESET "Error:");
+            exit(1);
+        }
 
         // Send command
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
         yarcon_serialize_data(&pckt, buffer);
         buffer_size = 4 + 4 + 4 + strlen(command) + 2;
+
         ret = send(sckfd, buffer, buffer_size, 0);
-        if (ret < 0)
-            perror("[!] \033[01;31mError\033[0m: failed to send packet");
+        if (ret < 0) {
+            perror(RED "[!] " RESET "Error:");
+            exit(1);
+        }
 
         ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
@@ -257,13 +197,12 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
         Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
-        printf("msg: %s\n", res->payload + 1);
+        // printf("msg: %s\n", res->payload + 1);
+        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s\n" RESET, res->payload + 1);
 
         close(sckfd);
         sckfd = -1;
     }
-
-    atexit(cleanup);
 
     return (0);
 }

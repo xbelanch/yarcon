@@ -6,10 +6,10 @@ Yet Another RCON is a console client that implements both Source and Battleye RC
 
   * [x] 7 Days to Die
   * [ ] Arma2
-  * [ ] Arma3
-  * [ ] DayZ
+  * [x] Arma3
+  * [x] DayZ
   * [ ] Minecraft
-  * [ ] Project Zomboid
+  * [x] Project Zomboid
   * [x] Rust Legacy
   * [ ] Rust
 

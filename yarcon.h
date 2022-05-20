@@ -55,23 +55,49 @@ typedef struct packet_battleye_struct
     unsigned char payload[MAX_BUFFER_SIZE]; // 0xff + packet type + command
 } Pckt_BE_Struct;
 
-void print_help()
-{
-    puts(
-         BGREEN "YARCON " VERSION RESET " - https://github.com/xbelanch/rcon\n"
-         "Send rcon commands to game servers with rcon support.\n\n"
-         "Usage: yarcon [OPTIONS] [COMMANDS]\n"
-         "Options:\n"
-         "  -H\t\tServer addres (default: 0.0.0.0)\n"
-         "  -P\t\tPort\n"
-         "  -p\t\tpassword\n"
-         "  -h\t\tPrint usage\n"
-         "  -v\t\tVersion\n\n"
-         );
+static char *strremove(char *s, char chr) {
+    char *e = malloc(sizeof(char) * 1024);
+    memset(e, 0, 1024);
 
-    puts ("Example:\n\tyarcon -H my.game.server -P port.server -p password -c \"status\"\n");
+    char *d = s;
+    char *ptr = e;
+    while (*d != '\0') {
+        if (*d == chr) {
+            ++d;
+        } else {
+            *e++ = *d++;
+        }
+    }
+    e = ptr;
+    return (e);
 }
 
+void append_str(char *src, unsigned char *dst)
+{
+    while (*src != '\0') {
+        *dst++ = *src++;
+    }
+}
+
+static void print_usage()
+{
+    puts("");
+    puts(RED "yarcon " VERSION RESET " - " GREEN "https://github.com/xbelanch/yarcon" RESET);
+    puts("Send rcon commands to game servers with rcon support.");
+    puts("Usage: yarcon [OPTIONS] [COMMANDS]");
+    puts("Options:");
+    puts("-H\t\tHost address (example: 0.0.0.0)");
+    puts("-p\t\tPort (example: 2301)");
+    puts("-P\t\tpassword");
+    puts("-h\t\tPrint usage");
+    puts("-c\t\tCommand");
+    puts("-b\t\tUse Battleye instead of Source Protocol");
+    puts("-d\t\tGive us some debug info");
+    // puts("-f\t\tOpen config file");
+    puts("Examples: ");
+    puts(BLUE "Project Zomboid:\t" YELLOW "yarcon -d -H 0.0.0.0 -p 16261 -P password -c players" RESET);
+    puts(BLUE "DayZ:\t\t\t" YELLOW "yarcon -b -d -H 0.0.0.0 -p 2301 -P password -c players" RESET);
+}
 
 // Stolen from: https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d
 uint32_t crc32(unsigned char *begin, unsigned char *end) {
@@ -129,13 +155,6 @@ void yarcon_populate_source_packet(Pckt_Src_Struct *pckt, PacketSourceType type,
     memcpy(pckt->body, body, strlen(body));
 }
 
-void append_str(char *src, unsigned char *dst)
-{
-    while (*src != '\0') {
-        *dst++ = *src++;
-    }
-}
-
 int yarcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
 {
     char *ptr = buffer;
@@ -149,9 +168,7 @@ int yarcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
 
 void yarcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  char *body)
 {
-
     // For checksum we need to populate payload first
-
     unsigned char payload[1024];
     memset(payload, '\0', 1024);
     unsigned char *ptr = payload;
@@ -163,9 +180,7 @@ void yarcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  c
         offset++;
     }
     append_str(body, ptr);
-
     memcpy(pckt->payload, payload, offset + strlen(body));
-
 
     unsigned char *begin = payload;
     unsigned char *end = payload + offset + strlen(body);
@@ -184,12 +199,11 @@ int rcon_send(int sckfd, char *buffer, int buffer_size, bool battleye) {
     return (ret);
 }
 
-
 int yarcon_send_packet(int sck, char *buffer, size_t len)
 {
     int ret = send(sck, buffer, len, 0);
     if (ret == -1) {
-        perror("[!] \033[01;31mError\033[0m: failed to send packet");
+        perror(RED "[!] " RESET "Error");
         return (-1);
     }
 
@@ -222,82 +236,23 @@ int yarcon_server_connect(char *host,
     if (type == RCON_SOURCE_PROTOCOL) {
         sckfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sckfd < 0) {
-            perror("Failed to create TCP socket");
+            perror(RED "[!] " RESET "Error");
             exit(1);
         }
         int err = connect(sckfd, (struct sockaddr *) &si_other, sockaddr_len);
         if (err < 0) {
-                perror("Cannot connect to server");
+                perror(RED "[!] " RESET "Error");
                 exit(1);
         }
     } // BE
     else if (type == RCON_BATTLEYE_PROTOCOL) {
         if ((sckfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0 ) {
-            perror("Failed to create UDP socket");
+            perror(RED "[!] " RESET "Error");
             exit(1);
         }
     }
 
     return (sckfd);
 }
-
-// int yarcon_parse_input_file(GameServer *gameserver, char *input)
-// {
-//     FILE *fp = fopen(input, "rb");
-//     if (NULL == fp) {
-//         fprintf(stderr, "[!] Cannot open file %s\n", input);
-//         exit(1);
-//     }
-
-//     char **lines = (char **) malloc(sizeof(char) * MAX_LINES_SIZE);
-//     char *entry = malloc(sizeof(char) * MAX_LINE_SIZE);
-//     memset(entry, 0, MAX_LINE_SIZE);
-//     char *s = malloc(sizeof(char) * MAX_LINE_SIZE);
-//     size_t size_lines_len = 0;
-//     while (fgets(s, MAX_LINE_SIZE, fp)) {
-
-//         // Clean one or more spaces
-//         char *d = s;
-//         char *ptr = entry;
-//         while (*d != '\0') {
-//             if (*d == ' ') {
-//                 ++d;
-//             } else {
-//                 *entry++ = *d++;
-//             }
-//         }
-
-//         entry = ptr;
-
-//         lines[size_lines_len] = (char *) malloc(sizeof(char) * strlen(entry) - 1);
-//         memcpy(lines[size_lines_len], entry, strlen(entry) - 1);
-//         memset(entry, 0, MAX_LINE_SIZE);
-//         size_lines_len++;
-//     }
-
-//     // Parser input data
-//     for (size_t i = 0; i < size_lines_len; ++i) {
-//         char *ptr_start = lines[i];
-//         char *ptr_end = strchr(lines[i], ':');
-//         size_t len = ptr_end - ptr_start;
-//         char *field = malloc(sizeof(char) * len);
-//         memset(field, 0, len);
-//         memcpy(field, lines[i], len);
-
-//         char *value = ptr_end + 1;
-//         if (!strcmp("game", field)) {
-//             memcpy(gameserver->game, value, strlen(value));
-//         } else if (!strcmp("host", field)) {
-//             memcpy(gameserver->host, value, strlen(value));
-//         } else if (!strcmp("port", field)) {
-//             memcpy(gameserver->port, value, strlen(value));
-//         } else if (!strcmp("password", field)) {
-//             memcpy(gameserver->password, value, strlen(value));
-//         }
-//     }
-
-//     fclose(fp);
-//     return (0);
-// }
 
 #endif // YARCON_H
