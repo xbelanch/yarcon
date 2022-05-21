@@ -108,7 +108,6 @@ static int parse_args(int ac, char *av[])
     return(0);
 }
 
-
 int main(int argc, char *argv[])
 {
     // Use current time as seed for random generator
@@ -132,7 +131,7 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
         yarcon_serialize_data(&pckt, buffer);
-        int buffer_size = 4 + 4 + 4 + strlen(password) + 2;
+        int buffer_size = (sizeof(uint32_t) * 3) + strlen(password) + 2;
 
         int ret = rcon_send(sckfd, buffer, buffer_size, false);
         if (ret < 0) {
@@ -150,7 +149,7 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
         yarcon_serialize_data(&pckt, buffer);
-        buffer_size = 4 + 4 + 4 + strlen(command) + 2;
+        buffer_size = (sizeof(uint32_t) * 3) + strlen(command) + 2;
 
         ret = send(sckfd, buffer, buffer_size, 0);
         if (ret < 0) {
@@ -181,9 +180,13 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, password);
         yarcon_serialize_be_data(&be_pckt, buffer);
-        int buffer_size = 2 + sizeof(uint32_t) + 2 + strlen(password);
+
+        int buffer_size = (sizeof(char) * 2) +
+            sizeof(uint32_t) +
+            (sizeof(char) * 2)
+            + strlen(password);
+
         rcon_send(sckfd, buffer, buffer_size, battleye);
-        // sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 2 + strlen(password), 0, (struct sockaddr *) &si_other, sockaddr_len);
         recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
@@ -193,7 +196,11 @@ int main(int argc, char *argv[])
         yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command);
         yarcon_serialize_be_data(&be_pckt, buffer);
 
-        sendto(sckfd, buffer, 2 + sizeof(uint32_t) + 3 + strlen(command), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        sendto(sckfd, buffer,
+               (sizeof(char) * 2) +
+               sizeof(uint32_t) +
+               (sizeof(char) * 3) +
+               strlen(command), 0, (struct sockaddr *) &si_other, sockaddr_len);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
         Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
