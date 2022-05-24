@@ -125,12 +125,12 @@ int main(int argc, char *argv[])
         char buffer[MAX_BUFFER_SIZE];
 
         // Connect with server
-        int sckfd = yarcon_server_connect(host, port, RCON_SOURCE_PROTOCOL);
+        int sckfd = rcon_server_connect(host, port, RCON_SOURCE_PROTOCOL);
 
         // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        yarcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
-        yarcon_serialize_data(&pckt, buffer);
+        rcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
+        rcon_serialize_data(&pckt, buffer);
         int buffer_size = (sizeof(uint32_t) * 3) + strlen(password) + 2;
 
         int ret = rcon_send(sckfd, buffer, buffer_size, false);
@@ -147,8 +147,8 @@ int main(int argc, char *argv[])
 
         // Send command
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        yarcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
-        yarcon_serialize_data(&pckt, buffer);
+        rcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
+        rcon_serialize_data(&pckt, buffer);
         buffer_size = (sizeof(uint32_t) * 3) + strlen(command) + 2;
 
         ret = send(sckfd, buffer, buffer_size, 0);
@@ -174,12 +174,12 @@ int main(int argc, char *argv[])
         Pckt_BE_Struct be_pckt = { 0 };
         char buffer[MAX_BUFFER_SIZE];
 
-        int sckfd = yarcon_server_connect(host, port, RCON_BATTLEYE_PROTOCOL);
+        int sckfd = rcon_server_connect(host, port, RCON_BATTLEYE_PROTOCOL);
 
         // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        yarcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, password);
-        yarcon_serialize_be_data(&be_pckt, buffer);
+        rcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, password);
+        rcon_serialize_be_data(&be_pckt, buffer);
 
         int buffer_size = (sizeof(char) * 2) +
             sizeof(uint32_t) +
@@ -193,8 +193,8 @@ int main(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
 
         // Send command to game server
-        yarcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command);
-        yarcon_serialize_be_data(&be_pckt, buffer);
+        rcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command);
+        rcon_serialize_be_data(&be_pckt, buffer);
 
         sendto(sckfd, buffer,
                (sizeof(char) * 2) +

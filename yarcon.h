@@ -55,30 +55,6 @@ typedef struct packet_battleye_struct
     unsigned char payload[MAX_BUFFER_SIZE]; // 0xff + packet type + command
 } Pckt_BE_Struct;
 
-static char *strremove(char *s, char chr) {
-    char *e = malloc(sizeof(char) * 1024);
-    memset(e, 0, 1024);
-
-    char *d = s;
-    char *ptr = e;
-    while (*d != '\0') {
-        if (*d == chr) {
-            ++d;
-        } else {
-            *e++ = *d++;
-        }
-    }
-    e = ptr;
-    return (e);
-}
-
-void append_str(char *src, unsigned char *dst)
-{
-    while (*src != '\0') {
-        *dst++ = *src++;
-    }
-}
-
 static void print_usage()
 {
     puts("");
@@ -97,6 +73,32 @@ static void print_usage()
     puts("Examples: ");
     puts(BLUE "Project Zomboid:\t" YELLOW "yarcon -d -H 0.0.0.0 -p 16261 -P password -c players" RESET);
     puts(BLUE "DayZ:\t\t\t" YELLOW "yarcon -b -d -H 0.0.0.0 -p 2301 -P password -c players" RESET);
+}
+
+// Simple function for removing a character
+static char *strremove(char *s, char chr) {
+    char *e = malloc(sizeof(char) * 1024);
+    memset(e, 0, 1024);
+
+    char *d = s;
+    char *ptr = e;
+    while (*d != '\0') {
+        if (*d == chr) {
+            ++d;
+        } else {
+            *e++ = *d++;
+        }
+    }
+    e = ptr;
+    return (e);
+}
+
+// Simple append string function
+void append_str(char *src, unsigned char *dst)
+{
+    while (*src != '\0') {
+        *dst++ = *src++;
+    }
 }
 
 // Stolen from: https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d
@@ -132,7 +134,7 @@ int serialize_int32_t(int32_t val, char *buffer)
     return (0);
 }
 
-int yarcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
+int rcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
 {
     char *ptr = buffer;
     serialize_int32_t(pckt->size, ptr);
@@ -146,16 +148,16 @@ int yarcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
     return (0);
 }
 
-void yarcon_populate_source_packet(Pckt_Src_Struct *pckt, PacketSourceType type, char *body)
+void rcon_populate_source_packet(Pckt_Src_Struct *pckt, PacketSourceType type, char *body)
 {
-    pckt->size = 4 + 4 + strlen(body) + 2;
+    pckt->size = (sizeof(uint32_t) * 2) + strlen(body) + 2;
     pckt->id = abs(rand());
     pckt->type = type;
-    pckt->len = 4 + 4 + 4 + strlen(body) + 2;
+    pckt->len = (sizeof(uint32_t) * 3) + strlen(body) + 2;
     memcpy(pckt->body, body, strlen(body));
 }
 
-int yarcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
+int rcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
 {
     char *ptr = buffer;
     memcpy(ptr, pckt->start_header, sizeof(unsigned char) * 2);
@@ -166,7 +168,7 @@ int yarcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
     return (0);
 }
 
-void yarcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  char *body)
+void rcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  char *body)
 {
     // For checksum we need to populate payload first
     unsigned char payload[1024];
@@ -189,34 +191,7 @@ void yarcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  c
     append_str("BE", pckt->start_header);
 }
 
-int rcon_send(int sckfd, char *buffer, int buffer_size, bool battleye) {
-    int ret;
-    if (battleye) {
-        ret = sendto(sckfd, buffer, buffer_size, 0, (struct sockaddr *) &si_other, sockaddr_len);
-    } else {
-        ret = send(sckfd, buffer, buffer_size, 0);
-    }
-    return (ret);
-}
-
-int yarcon_send_packet(int sck, char *buffer, size_t len)
-{
-    int ret = send(sck, buffer, len, 0);
-    if (ret == -1) {
-        perror(RED "[!] " RESET "Error");
-        return (-1);
-    }
-
-    return (0);
-}
-
-int yarcon_receive_response(int sck, char *buffer, size_t buffer_len)
-{
-    int ret = recv(sck, buffer, buffer_len, 0);
-    return (ret);
-}
-
-int yarcon_server_connect(char *host,
+int rcon_server_connect(char *host,
                           char *port,
                           RconProtocolType type)
 {
@@ -253,6 +228,21 @@ int yarcon_server_connect(char *host,
     }
 
     return (sckfd);
+}
+
+int rcon_send(int sckfd, char *buffer, int buffer_size, bool battleye) {
+    int ret;
+    if (battleye) {
+        ret = sendto(sckfd, buffer, buffer_size, 0, (struct sockaddr *) &si_other, sockaddr_len);
+    } else {
+        ret = send(sckfd, buffer, buffer_size, 0);
+    }
+    if (ret == -1) {
+        perror(RED "[!] " RESET "Error");
+        return (1);
+    } else {
+        return (ret);
+    }
 }
 
 #endif // YARCON_H
