@@ -115,8 +115,14 @@ int main(int argc, char *argv[])
     parse_args(argc, argv);
 
 
-    if (debug)
-        fprintf(stdout, BGREEN "[i] " RESET "host: " BYELLOW "%s " RESET "port: " BYELLOW "%s " RESET "command: " BYELLOW "%s\n" RESET , host, port, command);
+    if (debug) {
+        fprintf(stdout, BGREEN "[i] " RESET "host: " BYELLOW "%s " RESET "port: " BYELLOW "%s " RESET "command: " BYELLOW "%s " RESET "battleye: " BYELLOW, host, port, command);
+        if (battleye) {
+            puts("true" RESET);
+        } else {
+            puts("false" RESET);
+        }
+    }
 
     // Source Rcon
     if (!battleye)
@@ -132,12 +138,7 @@ int main(int argc, char *argv[])
         rcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
         rcon_serialize_data(&pckt, buffer);
         int buffer_size = (sizeof(uint32_t) * 3) + strlen(password) + 2;
-
         int ret = rcon_send(sckfd, buffer, buffer_size, false);
-        if (ret < 0) {
-            perror(RED "[!] " RESET "Error:");
-            exit(1);
-        }
 
         ret = recv(sckfd, buffer, buffer_size, 0);
         if (ret < 0) {
@@ -147,24 +148,27 @@ int main(int argc, char *argv[])
 
         // Send command
         memset(buffer, '\0', MAX_BUFFER_SIZE);
+        pckt = (Pckt_Src_Struct) { 0 };
+
         rcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
         rcon_serialize_data(&pckt, buffer);
+
         buffer_size = (sizeof(uint32_t) * 3) + strlen(command) + 2;
 
-        ret = send(sckfd, buffer, buffer_size, 0);
+        ret = rcon_send(sckfd, buffer, buffer_size, false);
+        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         if (ret < 0) {
             perror(RED "[!] " RESET "Error:");
             exit(1);
         }
 
-        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
         fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s" RESET, res->body);
 
         // TODO: Introducing game server functions
-        fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
+        // fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
 
         close(sckfd);
         sckfd = -1;
