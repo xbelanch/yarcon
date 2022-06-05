@@ -5,12 +5,12 @@ Yet Another RCON is a console client that implements both Source and Battleye RC
 ## Supported Games Servers
 
   * [x] 7 Days to Die
-  * [ ] Arma2
   * [x] Arma3
   * [x] DayZ
-  * [ ] Minecraft
   * [x] Project Zomboid
   * [x] Rust Legacy
+  * [ ] Arma2
+  * [ ] Minecraft
   * [ ] Rust
 
 ## Installing
@@ -31,3 +31,4 @@ To be done.
 - [@MultiMote battleye-rcon implemented in C](https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d)
 - [How to Code a Server and Client in C with Sockets on Linux – Code Examples](https://www.binarytides.com/server-client-example-c-sockets-linux/)
 - [Simple C example of doing an HTTP POST and consuming the response](https://stackoverflow.com/questions/22077802/simple-c-example-of-doing-an-http-post-and-consuming-the-response)
+- [Battleye RCON c test](https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d)
