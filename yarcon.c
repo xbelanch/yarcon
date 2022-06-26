@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <getopt.h>
 #include <time.h>
+#include <sys/time.h>
 #include <unistd.h>     // read, write, close
 #include <netinet/in.h> // struct sockaddr_in, struct sockaddr
 #include <sys/socket.h> // socket, connect
@@ -133,6 +134,14 @@ int main(int argc, char *argv[])
         // Connect with server
         int sckfd = rcon_server_connect(host, port, RCON_SOURCE_PROTOCOL);
 
+        // Fix issue on sometimes recv hangs executed from local server
+        // works better using hostname instead of 0.0.0.0
+        // from: https://stackoverflow.com/questions/2876024/linux-is-there-a-read-or-recv-from-socket-with-timeout
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        setsockopt(sckfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
         // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         rcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
@@ -164,10 +173,22 @@ int main(int argc, char *argv[])
 
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
-        Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
-        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s" RESET, res->body);
 
-        // TODO: Introducing game server functions
+        if (ret == -1) {
+            perror("\033[01;31merror\033[0m: socket error");
+            exit(1);
+        } else if (ret == 0) {
+            fputs("\033[01;31merror\033[0m: no data recieved\n", stderr);
+            exit(1);
+        } else if ((size_t)ret < sizeof(buffer_size) || buffer_size < 10) {
+            fputs("\033[01;31merror\033[0m: malformed packet\n", stderr);
+            exit(1);
+        }
+        fprintf(stdout, "%d\n", ret);
+        Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
+        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s\n" RESET, res->body);
+
+        // @TODO: Introducing game server functions
         // fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
 
         close(sckfd);
