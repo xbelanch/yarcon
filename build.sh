@@ -1,9 +1,13 @@
-#!/bin/sh
+#!/bin/bash
 
 set -xe
-
-CC="/usr/bin/gcc"
-CFLAGS="-Wall -Wextra -std=c99 -pedantic -ggdb"
-SRC="yarcon.c"
-
-$CC $CFLAGS -o yarcon $SRC
+out="yarcon"
+cc="/usr/bin/gcc"
+cflags="-Wall -Wextra -std=gnu11 -pedantic -ggdb"
+libs=
+src=( $(ls *.c) )
+$cc $cflags -c ${src[*]}
+objs=( $(ls *.o) )
+$cc ${objs[*]} $libs -o $out
+rm ${objs[*]}
+set +xe

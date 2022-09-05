@@ -109,12 +109,11 @@ static int parse_args(int ac, char *av[])
     return(0);
 }
 
-int main(int argc, char *argv[])
+int mainV2(int argc, char *argv[])
 {
     // Use current time as seed for random generator
     srand(time(0));
     parse_args(argc, argv);
-
 
     if (debug) {
         fprintf(stdout, BGREEN "[i] " RESET "host: " BYELLOW "%s " RESET "port: " BYELLOW "%s " RESET "command: " BYELLOW "%s " RESET "battleye: " BYELLOW, host, port, command);
