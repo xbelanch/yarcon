@@ -272,6 +272,84 @@ static void rcon_debug_source_packet(const char *direction, const Pckt_Src_Struc
     fputc('\n', stderr);
 }
 
+static void rcon_debug_be_payload_preview(const unsigned char *payload, size_t payload_size, bool redact_body)
+{
+    char preview[MAX_BUFFER_SIZE];
+    size_t prefix_len;
+    size_t body_len;
+
+    if (payload == NULL || payload_size == 0) {
+        fputs("<empty>", stderr);
+        return;
+    }
+
+    prefix_len = BATTLEYE_PAYLOAD_PREFIX_SIZE;
+    if (payload_size > 2 && payload[1] == BE_PACKET_COMMAND) {
+        prefix_len += BATTLEYE_COMMAND_SEQUENCE_SIZE;
+    }
+
+    if (payload_size <= prefix_len) {
+        fputs("<empty-body>", stderr);
+        return;
+    }
+
+    body_len = payload_size - prefix_len;
+    if (body_len >= sizeof(preview)) {
+        body_len = sizeof(preview) - 1;
+    }
+
+    memcpy(preview, payload + prefix_len, body_len);
+    preview[body_len] = '\0';
+    rcon_debug_body_preview(preview, redact_body);
+}
+
+static void rcon_debug_be_packet(const char *direction,
+                                 const Pckt_BE_Struct *pckt,
+                                 size_t packet_size,
+                                 size_t payload_size,
+                                 bool redact_body)
+{
+    if (pckt == NULL) {
+        return;
+    }
+
+    fprintf(stderr,
+            CYAN "[debug] " RESET "%s Battleye packet: packet_size=%zu payload_size=%zu header=%c%c checksum=0x%08x",
+            direction, packet_size, payload_size, pckt->start_header[0], pckt->start_header[1], pckt->checksum);
+
+    if (payload_size > 0) {
+        fprintf(stderr, " marker=0x%02x type=0x%02x",
+                pckt->payload[0], payload_size > 1 ? pckt->payload[1] : 0);
+        if (payload_size > 2 && pckt->payload[1] == BE_PACKET_COMMAND) {
+            fprintf(stderr, " sequence=0x%02x", pckt->payload[2]);
+        }
+        fputs(" body=", stderr);
+        rcon_debug_be_payload_preview(pckt->payload, payload_size, redact_body);
+    }
+
+    fputc('\n', stderr);
+}
+
+static void rcon_debug_be_received(const char *direction, const char *buffer, ssize_t received)
+{
+    Pckt_BE_Struct pckt = { 0 };
+    size_t payload_size;
+
+    if (received <= 0) {
+        fprintf(stderr, CYAN "[debug] " RESET "%s Battleye packet: bytes=%zd\n", direction, received);
+        return;
+    }
+
+    if ((size_t) received < BATTLEYE_HEADER_SIZE) {
+        fprintf(stderr, CYAN "[debug] " RESET "%s Battleye packet: bytes=%zd malformed-short\n", direction, received);
+        return;
+    }
+
+    memcpy(&pckt, buffer, (size_t) received);
+    payload_size = (size_t) received - BATTLEYE_HEADER_SIZE;
+    rcon_debug_be_packet(direction, &pckt, (size_t) received, payload_size, false);
+}
+
 static RconReadStatus rcon_recv_exact(int sckfd, char *buffer, size_t len, size_t *bytes_read)
 {
     size_t received = 0;

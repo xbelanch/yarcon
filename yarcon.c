@@ -363,8 +363,15 @@ int main(int argc, char *argv[])
     {
         Pckt_BE_Struct be_pckt = { 0 };
         char buffer[MAX_BUFFER_SIZE];
+        ssize_t recv_len;
 
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "Opening Battleye RCON UDP socket for %s:%s\n", host, port);
+        }
         int sckfd = rcon_server_connect(host, port, RCON_BATTLEYE_PROTOCOL);
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "UDP socket ready\n");
+        }
         struct timeval tv;
         tv.tv_sec = 1;
         tv.tv_usec = 0;
@@ -383,19 +390,30 @@ int main(int argc, char *argv[])
 
         size_t buffer_size = BATTLEYE_HEADER_SIZE + payload_size;
 
+        if (debug) {
+            rcon_debug_be_packet("send login", &be_pckt, buffer_size, payload_size, true);
+        }
         if (rcon_send(sckfd, buffer, buffer_size, battleye) < 0) {
             close(sckfd);
             cleanup_args();
             exit(1);
         }
-        if (recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+        recv_len = recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (debug) {
+            rcon_debug_be_received("recv login ack", buffer, recv_len);
+        }
+        if (recv_len < 0) {
             perror(RED "[!] " RESET "Error");
             close(sckfd);
             cleanup_args();
             exit(1);
         }
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        if (recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+        recv_len = recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (debug) {
+            rcon_debug_be_received("recv login status", buffer, recv_len);
+        }
+        if (recv_len < 0) {
             perror(RED "[!] " RESET "Error");
             close(sckfd);
             cleanup_args();
@@ -412,13 +430,20 @@ int main(int argc, char *argv[])
             exit(1);
         }
 
+        if (debug) {
+            rcon_debug_be_packet("send command", &be_pckt, BATTLEYE_HEADER_SIZE + payload_size, payload_size, false);
+        }
         if (rcon_send(sckfd, buffer, BATTLEYE_HEADER_SIZE + payload_size, battleye) < 0) {
             close(sckfd);
             cleanup_args();
             exit(1);
         }
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        if (recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+        recv_len = recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (debug) {
+            rcon_debug_be_received("recv command response", buffer, recv_len);
+        }
+        if (recv_len < 0) {
             perror(RED "[!] " RESET "Error");
             close(sckfd);
             cleanup_args();

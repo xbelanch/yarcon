@@ -75,10 +75,11 @@ Then run:
 
 ## Debugging
 
-Use `-d` when a Source RCON server, including Minecraft Java, connects but does not answer as expected:
+Use `-d` when an RCON server connects but does not answer as expected:
 
 ```sh
 ./yarcon -d -H 127.0.0.1 -p 25575 -P password -c list
+./yarcon -b -d -H 127.0.0.1 -p 2301 -P password -c players
 ```
 
 Debug output goes to `stderr` and includes:
@@ -86,6 +87,7 @@ Debug output goes to `stderr` and includes:
 - TCP connection start and success.
 - Source RCON packets sent and received with `size`, `id`, `type`, total length and body length.
 - Auth response and auth confirmation packets. A failed password is shown as `id=-1`.
+- Battleye UDP packets sent and received with packet size, payload size, checksum, packet type and body preview.
 - Read failures as `timeout`, `connection closed`, `socket error`, or `malformed packet`.
 
 The auth password body is redacted in debug output. Command and response bodies are shown as escaped previews.
