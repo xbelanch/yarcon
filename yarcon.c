@@ -5,9 +5,10 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <assert.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <ctype.h>
+#include <errno.h>
 #include <time.h>
 #include <sys/time.h>
 #include <unistd.h>     // read, write, close
@@ -17,7 +18,6 @@
 #include <arpa/inet.h>  // get IP addresses from sockaddr
 #include "yarcon.h"
 #include "color_utils.h"
-#include "pzserver.h"
 
 static char *host = NULL;
 static char *port = NULL;
@@ -26,34 +26,126 @@ static char *command = NULL;
 static char *config = NULL;
 static int debug = false;
 static int battleye = false;
+static bool host_owned = false;
+static bool port_owned = false;
 // static char *server = NULL;
 // static bool nowait = false;
 
-void parse_input_file(char *filename)
+static void replace_string(char **target, bool *owned, const char *value)
 {
-    // Read and parse input file
+    char *copy;
+
+    if (value == NULL) {
+        return;
+    }
+
+    copy = malloc(strlen(value) + 1);
+    if (copy == NULL) {
+        perror(RED "[!] " RESET "malloc");
+        exit(1);
+    }
+    strcpy(copy, value);
+
+    if (*owned) {
+        free(*target);
+    }
+
+    *target = copy;
+    *owned = true;
+}
+
+static char *trim_whitespace(char *value)
+{
+    char *end;
+
+    while (isspace((unsigned char) *value)) {
+        value++;
+    }
+
+    if (*value == '\0') {
+        return value;
+    }
+
+    end = value + strlen(value) - 1;
+    while (end > value && isspace((unsigned char) *end)) {
+        *end = '\0';
+        end--;
+    }
+
+    return value;
+}
+
+static void parse_input_file(const char *filename)
+{
+    // Config files accept "host: value" and "port: value" lines.
     FILE *fp = fopen(filename, "rb");
+    char line[MAX_LINE_SIZE];
+
     if (NULL == fp) {
         fprintf(stderr, "[!] Cannot open file %s\n", filename);
         exit(1);
     }
 
-    char *s = malloc(sizeof(char) * MAX_LINES_SIZE);
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *entry = trim_whitespace(line);
+        char *separator;
+        char *key;
+        char *value;
 
-    while (fgets(s, MAX_LINE_SIZE, fp)) {
+        if (*entry == '\0' || *entry == '#') {
+            continue;
+        }
 
-        char *entry = strremove(s, ' ');
-        if (strncmp("host", entry, strlen("host")) == 0) {
-            char *value = strchr(entry, ':') + 1;
-            host = malloc(sizeof(char) * strlen(value) - 1); // remove \n
-            strcpy(host, value);
-        } else if (strncmp("port", entry, strlen("port")) == 0) {
-            char *value = strchr(entry, ':') + 1;
-            port = malloc(sizeof(char) * strlen(value) - 1); // remove \n
-            strcpy(port, value);
+        separator = strchr(entry, ':');
+        if (separator == NULL) {
+            continue;
+        }
+
+        *separator = '\0';
+        key = trim_whitespace(entry);
+        value = trim_whitespace(separator + 1);
+
+        if (strcmp("host", key) == 0 && host == NULL) {
+            replace_string(&host, &host_owned, value);
+        } else if (strcmp("port", key) == 0 && port == NULL) {
+            replace_string(&port, &port_owned, value);
         }
     }
     fclose(fp);
+}
+
+static void cleanup_args(void)
+{
+    if (host_owned) {
+        free(host);
+        host = NULL;
+        host_owned = false;
+    }
+    if (port_owned) {
+        free(port);
+        port = NULL;
+        port_owned = false;
+    }
+    free(config);
+    config = NULL;
+}
+
+static void validate_args(void)
+{
+    uint16_t parsed_port;
+
+    if (host == NULL || port == NULL || password == NULL || command == NULL) {
+        print_error("Missing required arguments.");
+        print_usage();
+        cleanup_args();
+        exit(1);
+    }
+
+    if (!parse_tcp_port(port, &parsed_port)) {
+        print_error("Invalid port. Use a number between 1 and 65535.");
+        cleanup_args();
+        exit(1);
+    }
 }
 
 static int parse_args(int ac, char *av[])
@@ -88,8 +180,12 @@ static int parse_args(int ac, char *av[])
             break;
         case 'f':
             len = strlen(optarg);
-            config = calloc(1, len);
-            memcpy(config, optarg, len);
+            config = calloc(1, len + 1);
+            if (config == NULL) {
+                perror(RED "[!] " RESET "calloc");
+                exit(1);
+            }
+            memcpy(config, optarg, len + 1);
             break;
         case 'd': debug = true; break;
         case 'b': battleye = true; break;
@@ -109,11 +205,16 @@ static int parse_args(int ac, char *av[])
     return(0);
 }
 
-int mainV2(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
     // Use current time as seed for random generator
     srand(time(0));
     parse_args(argc, argv);
+    atexit(cleanup_args);
+    if (config != NULL) {
+        parse_input_file(config);
+    }
+    validate_args();
 
     if (debug) {
         fprintf(stdout, BGREEN "[i] " RESET "host: " BYELLOW "%s " RESET "port: " BYELLOW "%s " RESET "command: " BYELLOW "%s " RESET "battleye: " BYELLOW, host, port, command);
@@ -143,14 +244,27 @@ int mainV2(int argc, char *argv[])
 
         // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        rcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password);
-        rcon_serialize_data(&pckt, buffer);
-        int buffer_size = (sizeof(uint32_t) * 3) + strlen(password) + 2;
+        if (rcon_populate_source_packet(&pckt, SERVERDATA_AUTH, password) < 0 ||
+            rcon_serialize_data(&pckt, buffer, sizeof(buffer)) < 0) {
+            print_error("Password is too long to fit in a Source RCON packet.");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
+
+        size_t buffer_size = pckt.len;
         int ret = rcon_send(sckfd, buffer, buffer_size, false);
+        if (ret < 0) {
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
 
         ret = recv(sckfd, buffer, buffer_size, 0);
         if (ret < 0) {
             perror(RED "[!] " RESET "Error:");
+            close(sckfd);
+            cleanup_args();
             exit(1);
         }
 
@@ -158,15 +272,28 @@ int mainV2(int argc, char *argv[])
         memset(buffer, '\0', MAX_BUFFER_SIZE);
         pckt = (Pckt_Src_Struct) { 0 };
 
-        rcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command);
-        rcon_serialize_data(&pckt, buffer);
+        if (rcon_populate_source_packet(&pckt, SERVERDATA_EXECCOMMAND, command) < 0 ||
+            rcon_serialize_data(&pckt, buffer, sizeof(buffer)) < 0) {
+            print_error("Command is too long to fit in a Source RCON packet.");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
 
-        buffer_size = (sizeof(uint32_t) * 3) + strlen(command) + 2;
+        buffer_size = pckt.len;
 
         ret = rcon_send(sckfd, buffer, buffer_size, false);
+        if (ret < 0) {
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
+
         ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
         if (ret < 0) {
             perror(RED "[!] " RESET "Error:");
+            close(sckfd);
+            cleanup_args();
             exit(1);
         }
 
@@ -175,17 +302,23 @@ int mainV2(int argc, char *argv[])
 
         if (ret == -1) {
             perror("\033[01;31merror\033[0m: socket error");
+            close(sckfd);
+            cleanup_args();
             exit(1);
         } else if (ret == 0) {
             fputs("\033[01;31merror\033[0m: no data recieved\n", stderr);
+            close(sckfd);
+            cleanup_args();
             exit(1);
-        } else if ((size_t)ret < sizeof(buffer_size) || buffer_size < 10) {
+        } else if ((size_t)ret < SOURCE_RCON_HEADER_SIZE) {
             fputs("\033[01;31merror\033[0m: malformed packet\n", stderr);
+            close(sckfd);
+            cleanup_args();
             exit(1);
         }
-        fprintf(stdout, "%d\n", ret);
         Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
-        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s\n" RESET, res->body);
+        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%.*s\n" RESET,
+                ret - (int) SOURCE_RCON_HEADER_SIZE, res->body);
 
         // @TODO: Introducing game server functions
         // fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
@@ -199,34 +332,65 @@ int mainV2(int argc, char *argv[])
         char buffer[MAX_BUFFER_SIZE];
 
         int sckfd = rcon_server_connect(host, port, RCON_BATTLEYE_PROTOCOL);
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        setsockopt(sckfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
         // Auth phase
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        rcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, password);
-        rcon_serialize_be_data(&be_pckt, buffer);
+        size_t payload_size = 0;
+        if (rcon_populate_be_packet(&be_pckt, BE_PACKET_LOGIN, password, &payload_size) < 0 ||
+            rcon_serialize_be_data(&be_pckt, buffer, sizeof(buffer), payload_size) < 0) {
+            print_error("Password is too long to fit in a Battleye RCON packet.");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
 
-        int buffer_size = (sizeof(char) * 2) +
-            sizeof(uint32_t) +
-            (sizeof(char) * 2)
-            + strlen(password);
+        size_t buffer_size = BATTLEYE_HEADER_SIZE + payload_size;
 
-        rcon_send(sckfd, buffer, buffer_size, battleye);
-        recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (rcon_send(sckfd, buffer, buffer_size, battleye) < 0) {
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
+        if (recvfrom(sckfd, buffer, 2048, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+            perror(RED "[!] " RESET "Error");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+            perror(RED "[!] " RESET "Error");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
         memset(buffer, '\0', MAX_BUFFER_SIZE);
 
         // Send command to game server
-        rcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command);
-        rcon_serialize_be_data(&be_pckt, buffer);
+        if (rcon_populate_be_packet(&be_pckt, BE_PACKET_COMMAND, command, &payload_size) < 0 ||
+            rcon_serialize_be_data(&be_pckt, buffer, sizeof(buffer), payload_size) < 0) {
+            print_error("Command is too long to fit in a Battleye RCON packet.");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
 
-        sendto(sckfd, buffer,
-               (sizeof(char) * 2) +
-               sizeof(uint32_t) +
-               (sizeof(char) * 3) +
-               strlen(command), 0, (struct sockaddr *) &si_other, sockaddr_len);
+        if (rcon_send(sckfd, buffer, BATTLEYE_HEADER_SIZE + payload_size, battleye) < 0) {
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
         memset(buffer, '\0', MAX_BUFFER_SIZE);
-        recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len);
+        if (recvfrom(sckfd, buffer, MAX_BUFFER_SIZE, 0, (struct sockaddr *) &si_other, &sockaddr_len) < 0) {
+            perror(RED "[!] " RESET "Error");
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
         Pckt_BE_Struct *res = (Pckt_BE_Struct *)buffer;
         // printf("msg: %s\n", res->payload + 1);
         fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s\n" RESET, res->payload + 1);
@@ -235,5 +399,6 @@ int mainV2(int argc, char *argv[])
         sckfd = -1;
     }
 
+    cleanup_args();
     return (0);
 }

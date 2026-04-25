@@ -8,6 +8,16 @@
 #include <unistd.h> // remove warning Implicit declaration of function ‘read’ and ‘write’
 #include <errno.h>
 
+/*
+ * Legacy Project Zomboid connection probe.
+ *
+ * This file is kept as documentation of the original pzserver experiment:
+ * it creates Source RCON packets by hand and connects to a hardcoded server.
+ * The production CLI now lives in yarcon.c and build.sh intentionally builds
+ * only that entry point. Keep this function out of the default executable so
+ * credentials, IPs, and one-off debug behavior cannot accidentally ship.
+ */
+
 #define exit_if(r, ...)                                                                          \
     if (r) {                                                                                     \
         printf(__VA_ARGS__);                                                                     \
@@ -50,7 +60,7 @@ static void cleanup(void)
     // }
 }
 
-int main(int argc, char *argv[])
+int legacy_pzserver_probe(int argc, char *argv[])
 {
     (void) argc;
     (void) argv[0];

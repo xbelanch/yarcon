@@ -1,14 +1,27 @@
 #ifndef YARCON_H
 #define YARCON_H
 
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "color_utils.h"
 
 #define PROGRAM_NAME "yarcon"
 #define VERSION "0.1.0"
 #define MAX_BUFFER_SIZE 4096
-#define MAX_LINES_SIZE 128
 #define MAX_LINE_SIZE 64
+#define SOURCE_RCON_TRAILER_SIZE 2
+#define SOURCE_RCON_HEADER_SIZE (sizeof(int32_t) * 3)
+#define BATTLEYE_HEADER_SIZE ((sizeof(unsigned char) * 2) + sizeof(uint32_t))
+#define BATTLEYE_PAYLOAD_PREFIX_SIZE 2
+#define BATTLEYE_COMMAND_SEQUENCE_SIZE 1
 
 // Globals
 struct sockaddr_in si_other;
@@ -59,50 +72,52 @@ static void print_usage()
 {
     puts("");
     puts(RED "yarcon " VERSION RESET " - " GREEN "https://github.com/xbelanch/yarcon" RESET);
-    puts("Send rcon commands to game servers with rcon support.");
-    puts("Usage: yarcon [OPTIONS] [COMMANDS]");
+    puts("Send RCON commands to game servers with Source or Battleye RCON support.");
+    puts("");
+    puts("Usage:");
+    puts("  yarcon -H HOST -p PORT -P PASSWORD -c COMMAND [OPTIONS]");
+    puts("");
     puts("Options:");
-    puts("-H\t\tHost address (example: 0.0.0.0)");
-    puts("-p\t\tPort (example: 2301)");
-    puts("-P\t\tpassword");
-    puts("-h\t\tPrint usage");
-    puts("-c\t\tCommand");
-    puts("-b\t\tUse Battleye instead of Source Protocol");
-    puts("-d\t\tGive us some debug info");
-    // puts("-f\t\tOpen config file");
-    puts("Examples: ");
-    puts(BLUE "Project Zomboid:\t" YELLOW "yarcon -d -H 0.0.0.0 -p 16261 -P password -c players" RESET);
-    puts(BLUE "DayZ:\t\t\t" YELLOW "yarcon -b -d -H 0.0.0.0 -p 2301 -P password -c players" RESET);
+    puts("  -H, --host HOST       Host name or IP address (example: 127.0.0.1)");
+    puts("  -p, --port PORT       RCON port (example: 16261)");
+    puts("  -P, --password PASS   RCON password");
+    puts("  -c, --command CMD     Command to execute");
+    puts("  -b, --battleye        Use Battleye RCON instead of Source RCON");
+    puts("  -f, --config FILE     Read host and port from a simple config file");
+    puts("  -d, --debug           Print connection details before executing");
+    puts("  -h, --help            Show this help");
+    puts("");
+    puts("Examples:");
+    puts(BLUE "  Project Zomboid: " YELLOW "yarcon -H 127.0.0.1 -p 16261 -P password -c players" RESET);
+    puts(BLUE "  DayZ Battleye:   " YELLOW "yarcon -b -H 127.0.0.1 -p 2301 -P password -c players" RESET);
 }
 
-// Simple function for removing a character
-static char *strremove(char *s, char chr) {
-    char *e = malloc(sizeof(char) * 1024);
-    memset(e, 0, 1024);
-
-    char *d = s;
-    char *ptr = e;
-    while (*d != '\0') {
-        if (*d == chr) {
-            ++d;
-        } else {
-            *e++ = *d++;
-        }
-    }
-    e = ptr;
-    return (e);
-}
-
-// Simple append string function
-void append_str(char *src, unsigned char *dst)
+static void print_error(const char *message)
 {
-    while (*src != '\0') {
-        *dst++ = *src++;
-    }
+    fprintf(stderr, RED "[!] " RESET "%s\n", message);
 }
 
-// Stolen from: https://gist.github.com/MultiMote/169265fd74fe94b44941c1b05b296f0d
-uint32_t crc32(unsigned char *begin, unsigned char *end) {
+static bool parse_tcp_port(const char *port, uint16_t *out)
+{
+    char *end = NULL;
+    long parsed;
+
+    if (port == NULL || *port == '\0') {
+        return false;
+    }
+
+    errno = 0;
+    parsed = strtol(port, &end, 10);
+    if (errno != 0 || end == port || *end != '\0' || parsed < 1 || parsed > 65535) {
+        return false;
+    }
+
+    *out = (uint16_t) parsed;
+    return true;
+}
+
+// CRC32 implementation used by the documented Battleye RCON packet format.
+static uint32_t crc32(unsigned char *begin, unsigned char *end) {
    int j;
    uint32_t byte, crc, mask;
    static uint32_t table[256];
@@ -127,15 +142,19 @@ uint32_t crc32(unsigned char *begin, unsigned char *end) {
    return ~crc;
 }
 
-int serialize_int32_t(int32_t val, char *buffer)
+static int serialize_int32_t(int32_t val, char *buffer)
 {
-    // val = htonl(val);
+    // Source RCON fields are sent little-endian by the protocol.
     memcpy(buffer, &val, sizeof(int32_t));
     return (0);
 }
 
-int rcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
+static int rcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer, size_t buffer_size)
 {
+    if (pckt == NULL || buffer == NULL || pckt->len > buffer_size) {
+        return (-1);
+    }
+
     char *ptr = buffer;
     serialize_int32_t(pckt->size, ptr);
     ptr += sizeof(int32_t);
@@ -144,67 +163,118 @@ int rcon_serialize_data(Pckt_Src_Struct *pckt, char *buffer)
     serialize_int32_t(pckt->type, ptr);
     ptr += sizeof(int32_t);
     memcpy(ptr, pckt->body, strlen(pckt->body));
+    ptr += strlen(pckt->body);
+    *ptr++ = '\0';
+    *ptr = '\0';
 
     return (0);
 }
 
-void rcon_populate_source_packet(Pckt_Src_Struct *pckt, PacketSourceType type, char *body)
+static int rcon_populate_source_packet(Pckt_Src_Struct *pckt, PacketSourceType type, const char *body)
 {
-    pckt->size = (sizeof(uint32_t) * 2) + strlen(body) + 2;
+    size_t body_len;
+
+    if (pckt == NULL || body == NULL) {
+        return (-1);
+    }
+
+    body_len = strlen(body);
+    if (body_len >= sizeof(pckt->body)) {
+        return (-1);
+    }
+
+    pckt->size = (int32_t) ((sizeof(uint32_t) * 2) + body_len + SOURCE_RCON_TRAILER_SIZE);
     pckt->id = abs(rand());
     pckt->type = type;
-    pckt->len = (sizeof(uint32_t) * 3) + strlen(body) + 2;
-    memcpy(pckt->body, body, strlen(body));
+    pckt->len = SOURCE_RCON_HEADER_SIZE + body_len + SOURCE_RCON_TRAILER_SIZE;
+    memcpy(pckt->body, body, body_len + 1);
+    return (0);
 }
 
-int rcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer)
+static int rcon_serialize_be_data(Pckt_BE_Struct *pckt, char *buffer, size_t buffer_size, size_t payload_size)
 {
+    size_t packet_size = BATTLEYE_HEADER_SIZE + payload_size;
+
+    if (pckt == NULL || buffer == NULL || packet_size > buffer_size || payload_size > sizeof(pckt->payload)) {
+        return (-1);
+    }
+
     char *ptr = buffer;
     memcpy(ptr, pckt->start_header, sizeof(unsigned char) * 2);
     ptr += sizeof(unsigned char) * 2;
     memcpy(ptr, &pckt->checksum, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
-    memcpy(ptr, &pckt->payload, 1024);
+    memcpy(ptr, pckt->payload, payload_size);
     return (0);
 }
 
-void rcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type,  char *body)
+static int rcon_populate_be_packet(Pckt_BE_Struct *pckt, PacketBattleyeType type, const char *body, size_t *payload_size)
 {
-    // For checksum we need to populate payload first
-    unsigned char payload[1024];
-    memset(payload, '\0', 1024);
+    // Battleye checksums cover only the payload after the "BE" packet header.
+    unsigned char payload[MAX_BUFFER_SIZE];
     unsigned char *ptr = payload;
-    memset(ptr++, 0xFF, sizeof(unsigned char));
-    memset(ptr++, type, sizeof(unsigned char));
-    int offset = 2;
-    if (type == BE_PACKET_COMMAND) {
-        memset(ptr++, 0x0, sizeof(unsigned char));
-        offset++;
+    size_t body_len;
+    size_t prefix_len = BATTLEYE_PAYLOAD_PREFIX_SIZE;
+
+    if (pckt == NULL || body == NULL || payload_size == NULL) {
+        return (-1);
     }
-    append_str(body, ptr);
-    memcpy(pckt->payload, payload, offset + strlen(body));
+
+    body_len = strlen(body);
+    if (type == BE_PACKET_COMMAND) {
+        prefix_len += BATTLEYE_COMMAND_SEQUENCE_SIZE;
+    }
+
+    if (prefix_len + body_len > sizeof(pckt->payload)) {
+        return (-1);
+    }
+
+    memset(payload, 0, sizeof(payload));
+    *ptr++ = 0xFF;
+    *ptr++ = (unsigned char) type;
+    if (type == BE_PACKET_COMMAND) {
+        *ptr++ = 0x00;
+    }
+    memcpy(ptr, body, body_len);
+
+    *payload_size = prefix_len + body_len;
+    memcpy(pckt->payload, payload, *payload_size);
 
     unsigned char *begin = payload;
-    unsigned char *end = payload + offset + strlen(body);
+    unsigned char *end = payload + *payload_size;
 
     pckt->checksum = crc32(begin, end);
-    append_str("BE", pckt->start_header);
+    pckt->start_header[0] = 'B';
+    pckt->start_header[1] = 'E';
+    return (0);
 }
 
-int rcon_server_connect(char *host,
-                          char *port,
-                          RconProtocolType type)
+static int rcon_server_connect(const char *host,
+                               const char *port,
+                               RconProtocolType type)
 {
-    int sckfd;
+    int sckfd = -1;
+    uint16_t parsed_port = 0;
     sockaddr_len = sizeof(si_other);
     struct hostent *hostname = gethostbyname(host);
-    si_other.sin_port = htons(atoi(port));
+
+    if (!parse_tcp_port(port, &parsed_port)) {
+        print_error("Invalid port. Use a number between 1 and 65535.");
+        exit(1);
+    }
+
+    memset(&si_other, 0, sizeof(si_other));
+    si_other.sin_port = htons(parsed_port);
     si_other.sin_family = AF_INET;
 
     if( hostname != NULL) {
         memcpy(&si_other.sin_addr, hostname->h_addr_list[0], hostname->h_length);
     } else {
         si_other.sin_addr.s_addr = inet_addr(host);
+        if (si_other.sin_addr.s_addr == INADDR_NONE) {
+            print_error("Could not resolve host.");
+            exit(1);
+        }
     }
 
     // SOURCE
@@ -230,16 +300,24 @@ int rcon_server_connect(char *host,
     return (sckfd);
 }
 
-int rcon_send(int sckfd, char *buffer, int buffer_size, bool battleye) {
-    int ret;
+static int rcon_send(int sckfd, const char *buffer, size_t buffer_size, bool battleye) {
+    ssize_t ret;
     if (battleye) {
         ret = sendto(sckfd, buffer, buffer_size, 0, (struct sockaddr *) &si_other, sockaddr_len);
     } else {
-        ret = send(sckfd, buffer, buffer_size, 0);
+        size_t sent = 0;
+        while (sent < buffer_size) {
+            ret = send(sckfd, buffer + sent, buffer_size - sent, 0);
+            if (ret <= 0) {
+                break;
+            }
+            sent += (size_t) ret;
+        }
+        ret = (sent == buffer_size) ? (ssize_t) sent : -1;
     }
     if (ret == -1) {
         perror(RED "[!] " RESET "Error");
-        return (1);
+        return (-1);
     } else {
         return (ret);
     }
