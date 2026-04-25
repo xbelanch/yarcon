@@ -229,10 +229,19 @@ int main(int argc, char *argv[])
     if (!battleye)
     {
         Pckt_Src_Struct pckt = { 0 };
+        Pckt_Src_Struct res = { 0 };
+        RconSourceReadResult read_result = { 0 };
         char buffer[MAX_BUFFER_SIZE];
+        int auth_id;
 
         // Connect with server
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "Opening Source RCON TCP connection to %s:%s\n", host, port);
+        }
         int sckfd = rcon_server_connect(host, port, RCON_SOURCE_PROTOCOL);
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "TCP connection established\n");
+        }
 
         // Fix issue on sometimes recv hangs executed from local server
         // works better using hostname instead of 0.0.0.0
@@ -253,6 +262,10 @@ int main(int argc, char *argv[])
         }
 
         size_t buffer_size = pckt.len;
+        auth_id = pckt.id;
+        if (debug) {
+            rcon_debug_source_packet("send auth", &pckt, true);
+        }
         int ret = rcon_send(sckfd, buffer, buffer_size, false);
         if (ret < 0) {
             close(sckfd);
@@ -260,9 +273,42 @@ int main(int argc, char *argv[])
             exit(1);
         }
 
-        ret = recv(sckfd, buffer, buffer_size, 0);
-        if (ret < 0) {
-            perror(RED "[!] " RESET "Error:");
+        read_result = rcon_read_source_packet(sckfd, &res);
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "read auth response: status=%s bytes=%zu declared_size=%d\n",
+                    rcon_read_status_name(read_result.status), read_result.bytes_read, read_result.packet_size);
+            if (read_result.status == RCON_READ_OK) {
+                rcon_debug_source_packet("recv auth response", &res, false);
+            }
+        }
+        if (read_result.status != RCON_READ_OK) {
+            fprintf(stderr, RED "[!] " RESET "Could not read Source RCON auth response: %s\n",
+                    rcon_read_status_name(read_result.status));
+            close(sckfd);
+            cleanup_args();
+            exit(1);
+        }
+
+        if (res.type == SERVERDATA_RESPONSE_VALUE) {
+            read_result = rcon_read_source_packet(sckfd, &res);
+            if (debug) {
+                fprintf(stderr, CYAN "[debug] " RESET "read auth confirmation: status=%s bytes=%zu declared_size=%d\n",
+                        rcon_read_status_name(read_result.status), read_result.bytes_read, read_result.packet_size);
+                if (read_result.status == RCON_READ_OK) {
+                    rcon_debug_source_packet("recv auth confirmation", &res, false);
+                }
+            }
+            if (read_result.status != RCON_READ_OK) {
+                fprintf(stderr, RED "[!] " RESET "Could not read Source RCON auth confirmation: %s\n",
+                        rcon_read_status_name(read_result.status));
+                close(sckfd);
+                cleanup_args();
+                exit(1);
+            }
+        }
+
+        if (res.id == -1 || res.id != auth_id) {
+            print_error("Authentication failed. Check the RCON password.");
             close(sckfd);
             cleanup_args();
             exit(1);
@@ -282,6 +328,9 @@ int main(int argc, char *argv[])
 
         buffer_size = pckt.len;
 
+        if (debug) {
+            rcon_debug_source_packet("send command", &pckt, false);
+        }
         ret = rcon_send(sckfd, buffer, buffer_size, false);
         if (ret < 0) {
             close(sckfd);
@@ -289,36 +338,23 @@ int main(int argc, char *argv[])
             exit(1);
         }
 
-        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
-        if (ret < 0) {
-            perror(RED "[!] " RESET "Error:");
+        read_result = rcon_read_source_packet(sckfd, &res);
+        if (debug) {
+            fprintf(stderr, CYAN "[debug] " RESET "read command response: status=%s bytes=%zu declared_size=%d\n",
+                    rcon_read_status_name(read_result.status), read_result.bytes_read, read_result.packet_size);
+            if (read_result.status == RCON_READ_OK) {
+                rcon_debug_source_packet("recv command response", &res, false);
+            }
+        }
+        if (read_result.status != RCON_READ_OK) {
+            fprintf(stderr, RED "[!] " RESET "Could not read Source RCON command response: %s\n",
+                    rcon_read_status_name(read_result.status));
             close(sckfd);
             cleanup_args();
             exit(1);
         }
 
-        memset(buffer, '\0', MAX_BUFFER_SIZE);
-        ret = recv(sckfd, buffer, MAX_BUFFER_SIZE, 0);
-
-        if (ret == -1) {
-            perror("\033[01;31merror\033[0m: socket error");
-            close(sckfd);
-            cleanup_args();
-            exit(1);
-        } else if (ret == 0) {
-            fputs("\033[01;31merror\033[0m: no data recieved\n", stderr);
-            close(sckfd);
-            cleanup_args();
-            exit(1);
-        } else if ((size_t)ret < SOURCE_RCON_HEADER_SIZE) {
-            fputs("\033[01;31merror\033[0m: malformed packet\n", stderr);
-            close(sckfd);
-            cleanup_args();
-            exit(1);
-        }
-        Pckt_Src_Struct *res = (Pckt_Src_Struct *)buffer;
-        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%.*s\n" RESET,
-                ret - (int) SOURCE_RCON_HEADER_SIZE, res->body);
+        fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%s\n" RESET, res.body);
 
         close(sckfd);
         sckfd = -1;

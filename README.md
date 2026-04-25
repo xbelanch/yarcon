@@ -44,7 +44,7 @@ Options:
 
 - `-b, --battleye`: use Battleye RCON over UDP. Without this flag, yarcon uses Source RCON over TCP.
 - `-f, --config FILE`: read `host` and `port` from a config file. CLI values take precedence.
-- `-d, --debug`: print connection settings before sending the command.
+- `-d, --debug`: print connection settings and protocol-level packet traces before sending the command.
 - `-h, --help`: print usage information.
 
 Examples:
@@ -52,6 +52,9 @@ Examples:
 ```sh
 # Source RCON
 ./yarcon -H 127.0.0.1 -p 27015 -P password -c status
+
+# Minecraft Java RCON
+./yarcon -H 127.0.0.1 -p 25575 -P password -c list
 
 # Battleye RCON
 ./yarcon -b -H 127.0.0.1 -p 2301 -P password -c players
@@ -70,6 +73,23 @@ Then run:
 ./yarcon -f server.conf -P password -c players
 ```
 
+## Debugging
+
+Use `-d` when a Source RCON server, including Minecraft Java, connects but does not answer as expected:
+
+```sh
+./yarcon -d -H 127.0.0.1 -p 25575 -P password -c list
+```
+
+Debug output goes to `stderr` and includes:
+
+- TCP connection start and success.
+- Source RCON packets sent and received with `size`, `id`, `type`, total length and body length.
+- Auth response and auth confirmation packets. A failed password is shown as `id=-1`.
+- Read failures as `timeout`, `connection closed`, `socket error`, or `malformed packet`.
+
+The auth password body is redacted in debug output. Command and response bodies are shown as escaped previews.
+
 ## Command Examples
 
 RCON commands are owned by each game server, not by yarcon. Treat the table below as a starting point and check your server's current command reference before using destructive commands such as ban, kick, shutdown, restart, or save.
@@ -86,10 +106,41 @@ RCON commands are owned by each game server, not by yarcon. Treat the table belo
 
 Some games require commands to be entered without the in-game slash when sent through RCON. For example, an in-game `/save` command may be sent as `save`.
 
+For Minecraft Java, enable RCON in `server.properties` before connecting:
+
+```properties
+enable-rcon=true
+rcon.password=password
+rcon.port=25575
+```
+
+### Minecraft Golden Age / Beta 1.7.3
+
+Minecraft Beta 1.7.3, often treated as the "Golden Age" release, does not implement RCON. Minecraft Java RCON was introduced later, in Beta 1.9 Prerelease. Publishing or exposing port `25575` in Docker is not enough: the `server.jar` itself must open and speak RCON on that port.
+
+For a Beta 1.7.3 server, this can look misleading:
+
+```txt
+docker-compose ps   # shows 25575:25575 published
+ss on the host      # shows Docker listening on 0.0.0.0:25575
+nc from a client    # returns "Connection refused"
+```
+
+In that case yarcon is not reaching an RCON server; Docker is publishing a port that the Minecraft process inside the container does not actually serve. Check from inside the container:
+
+```sh
+docker exec -it mc-beta173 sh
+ss -ltnp
+grep -i rcon /data/server.properties
+```
+
+If only `25565` is listening and there are no `enable-rcon`, `rcon.password`, or `rcon.port` properties, the server version has no native RCON support. Use a newer Minecraft Java server, a mod/wrapper/proxy that exposes remote console control, or manage the process through Docker/stdin/logs instead of RCON.
+
 ## Implementation Notes
 
 - `yarcon.c` is the production CLI entry point.
 - `yarcon.h` contains packet helpers for Source and Battleye RCON.
+- Source RCON reads now follow Minecraft-compatible packet framing: read the 4-byte size first, read the exact payload length, and reject failed auth responses.
 - `game_response.h` contains optional, game-agnostic response parsing helpers for future command-specific features.
 - Game-specific experiments and hardcoded probe code have been removed from the default project tree so the client stays protocol-focused.
 
