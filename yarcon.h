@@ -88,8 +88,8 @@ static void print_usage()
     puts("  -h, --help            Show this help");
     puts("");
     puts("Examples:");
-    puts(BLUE "  Project Zomboid: " YELLOW "yarcon -H 127.0.0.1 -p 16261 -P password -c players" RESET);
-    puts(BLUE "  DayZ Battleye:   " YELLOW "yarcon -b -H 127.0.0.1 -p 2301 -P password -c players" RESET);
+    puts(BLUE "  Source RCON:   " YELLOW "yarcon -H 127.0.0.1 -p 27015 -P password -c status" RESET);
+    puts(BLUE "  Battleye RCON: " YELLOW "yarcon -b -H 127.0.0.1 -p 2301 -P password -c players" RESET);
 }
 
 static void print_error(const char *message)

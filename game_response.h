@@ -1,14 +1,14 @@
-#ifndef PZSERVER_H
-#define PZSERVER_H
+#ifndef GAME_RESPONSE_H
+#define GAME_RESPONSE_H
 
-// Project Zomboid Related Functions
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-// Extract the active player count from Project Zomboid's "players" output.
-// Expected fragment: "... (12)"; invalid or oversized values return -1.
-static int8_t pzserver_get_num_players(const char *input)
+// Extract a small non-negative integer between two delimiters in a server response.
+// This is intentionally game-agnostic; callers decide whether "(12)", "[12]",
+// or another response shape has useful meaning for a specific command.
+static int8_t game_response_extract_int_between(const char *input, char open, char close)
 {
     const char *begin;
     const char *end;
@@ -20,13 +20,13 @@ static int8_t pzserver_get_num_players(const char *input)
         return -1;
     }
 
-    begin = strchr(input, '(');
+    begin = strchr(input, open);
     if (begin == NULL) {
         return -1;
     }
 
     begin++;
-    end = strchr(begin, ')');
+    end = strchr(begin, close);
     if (end == NULL) {
         return -1;
     }
@@ -45,4 +45,4 @@ static int8_t pzserver_get_num_players(const char *input)
     return (int8_t) parsed;
 }
 
-#endif // PZSERVER_H
+#endif // GAME_RESPONSE_H

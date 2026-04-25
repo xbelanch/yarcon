@@ -320,9 +320,6 @@ int main(int argc, char *argv[])
         fprintf(stdout, BGREEN "[i] " RESET "Response from server:\n" BPURPLE "%.*s\n" RESET,
                 ret - (int) SOURCE_RCON_HEADER_SIZE, res->body);
 
-        // @TODO: Introducing game server functions
-        // fprintf(stdout, BRED "%d\n" RESET, pzserver_get_num_players(res->body));
-
         close(sckfd);
         sckfd = -1;
     } else

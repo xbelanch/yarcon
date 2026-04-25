@@ -1,17 +1,15 @@
 # yarcon
 
-Yet Another RCON is a console client that implements both Source and Battleye RCON protocol. You can execute commands on remote game servers for administration and maintenance.
+Yet Another RCON is a small console client for sending administration commands to game servers over RCON. The code is protocol-oriented rather than game-specific: yarcon currently speaks Source RCON over TCP and Battleye RCON over UDP, then passes the command text through to the server.
 
-## Supported Games Servers
+## Protocol Support
 
-  * [x] 7 Days to Die
-  * [x] Arma3
-  * [x] DayZ
-  * [x] Project Zomboid
-  * [x] Rust Legacy
-  * [ ] Arma2
-  * [ ] Minecraft
-  * [ ] Rust
+| Protocol | Transport | Typical servers |
+| --- | --- | --- |
+| Source RCON | TCP | Source Dedicated Server games, Project Zomboid, 7 Days to Die, Rust Legacy, Minecraft Java servers that expose Source-style RCON |
+| Battleye RCON | UDP | DayZ, Arma 2/3 and other Battleye-enabled servers |
+
+Game support depends on the server exposing a compatible RCON endpoint and accepting the command you send. yarcon does not maintain game-specific sessions or command parsers.
 
 ## Installing
 
@@ -21,7 +19,7 @@ Build the binary with the bundled script:
 ./build.sh
 ```
 
-The script compiles `yarcon.c` with `gcc` and writes the executable to `./yarcon`.
+The script compiles the CLI entry point in `yarcon.c` with `gcc` and writes the executable to `./yarcon`.
 
 Requirements:
 
@@ -52,10 +50,10 @@ Options:
 Examples:
 
 ```sh
-# Project Zomboid / Source RCON
-./yarcon -H 127.0.0.1 -p 16261 -P password -c players
+# Source RCON
+./yarcon -H 127.0.0.1 -p 27015 -P password -c status
 
-# DayZ / Battleye RCON
+# Battleye RCON
 ./yarcon -b -H 127.0.0.1 -p 2301 -P password -c players
 ```
 
@@ -72,12 +70,28 @@ Then run:
 ./yarcon -f server.conf -P password -c players
 ```
 
+## Command Examples
+
+RCON commands are owned by each game server, not by yarcon. Treat the table below as a starting point and check your server's current command reference before using destructive commands such as ban, kick, shutdown, restart, or save.
+
+| Server family | Protocol flag | Useful discovery commands | Common administration commands |
+| --- | --- | --- | --- |
+| Source Dedicated Server games | default Source RCON | `status`, `cvarlist`, `help <command>` | `say <message>`, `kick <name or userid>`, `banid <minutes> <steamid>`, `changelevel <map>` |
+| Project Zomboid | default Source RCON | `players`, `help` | `servermsg "message"`, `save`, `quit`, `kickuser "username" -r "reason"`, `banuser "username"` |
+| 7 Days to Die | default Source RCON | `help`, `listplayers`, `version` | `say "message"`, `kick <entityid or steamid> <reason>`, `ban add <name or id> <duration> <reason>`, `saveworld`, `shutdown` |
+| Rust Legacy | default Source RCON | `status`, `find .` | `say "message"`, `kick "player"`, `banid <steamid>`, `save.all` |
+| DayZ / Arma Battleye | `-b, --battleye` | `commands`, `version`, `players`, `admins` | `say -1 <message>`, `kick <player #> <reason>`, `ban <player #> <minutes> <reason>`, `bans`, `removeBan <ban #>` |
+| Arma server commands through Battleye | `-b, --battleye` | `missions`, `players` | `#missions`, `#mission <missionName>`, `#restart`, `#reassign`, `#shutdown` |
+| Minecraft Java RCON | default Source RCON-compatible framing | `list`, `help` | `say <message>`, `kick <player> [reason]`, `ban <player> [reason]`, `save-all`, `stop` |
+
+Some games require commands to be entered without the in-game slash when sent through RCON. For example, an in-game `/save` command may be sent as `save`.
+
 ## Implementation Notes
 
 - `yarcon.c` is the production CLI entry point.
 - `yarcon.h` contains packet helpers for Source and Battleye RCON.
-- `pzserver.h` contains Project Zomboid parsing helpers. It returns `-1` for malformed player-count output instead of reading past the input or leaking memory.
-- `main.c` is preserved only as a documented legacy Project Zomboid probe. It is not compiled by `build.sh` because it contains hardcoded connection data and one-off experimental flow.
+- `game_response.h` contains optional, game-agnostic response parsing helpers for future command-specific features.
+- Game-specific experiments and hardcoded probe code have been removed from the default project tree so the client stays protocol-focused.
 
 The current CLI validates required arguments, checks port ranges, bounds packet payloads before serialization, avoids config parser leaks, and sends the whole TCP packet even when `send(2)` writes only part of the buffer.
 
@@ -85,6 +99,11 @@ The current CLI validates required arguments, checks port ranges, bounds packet 
 
 - [Source RCON Protocol](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol)
 - [Battleye RCON Protocol](https://www.battleye.com/downloads/BERConProtocol.txt)
+- [Project Zomboid dedicated server](https://pzwiki.net/wiki/Dedicated_server)
+- [Project Zomboid administration commands](https://citadelservers.com/wiki/index.php?title=Administrating_a_server_in_Project_Zomboid)
+- [7 Days to Die serveradmin.xml command permissions](https://wiki.7d2d.net/game/serveradmin-xml/)
+- [Bohemia BattlEye RCON notes](https://community.bohemia.net/wiki/BattlEye)
+- [Minecraft server commands](https://minecraft.wiki/w/Commands)
 - [@n0la rcon](https://github.com/n0la/rcon)
 - [@Tiiffi mcrcon](https://github.com/Tiiffi/mcrcon)
 - [rconc](https://git.kasad.com/rconc/about/)
